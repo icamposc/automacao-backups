@@ -1,0 +1,25 @@
+# ============================================================
+# Dependências Python do projeto Automação de Backups
+# Instalar com: pip install -r requirements.txt
+# ============================================================
+
+# Servidor web leve para receber webhooks
+Flask==3.1.0
+
+# Cliente oficial do Google para APIs (Vault e Drive)
+google-api-python-client==2.159.0
+
+# Autenticação com Service Account do Google
+google-auth==2.37.0
+
+# Download de arquivos do Cloud Storage (exports do Vault)
+google-cloud-storage==2.19.0
+
+# Requisições HTTP para API REST do Jira
+requests==2.32.3
+
+# Carregamento de variáveis de ambiente do arquivo .env
+python-dotenv==1.0.1
+
+# Servidor WSGI para produção (substitui o servidor de desenvolvimento do Flask)
+gunicorn==23.0.0
