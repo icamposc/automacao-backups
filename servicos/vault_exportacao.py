@@ -78,6 +78,7 @@ def criar_exportacao_email(email: str) -> dict:
         "query": {
             "corpus": "MAIL",
             "dataScope": "ALL_DATA",
+            "searchMethod": "ACCOUNT",
             "mailOptions": {
                 "excludeDrafts": False,
             },
@@ -125,6 +126,7 @@ def criar_exportacao_drive(email: str) -> dict:
         "query": {
             "corpus": "DRIVE",
             "dataScope": "ALL_DATA",
+            "searchMethod": "ACCOUNT",
             "driveOptions": {
                 "includeSharedDrives": False,
                 "includeTeamDrives": False,
