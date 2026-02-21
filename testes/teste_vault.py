@@ -29,7 +29,7 @@ class TestVaultExportacao:
     """
 
     # E-mail de teste — altere para um e-mail válido no seu domínio
-    EMAIL_TESTE = "teste.backup@empresa.com"
+    EMAIL_TESTE = "teste.backup@exemplo.com.br"
 
     @pytest.mark.skipif(
         not Path(".env").exists(),
