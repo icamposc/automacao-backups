@@ -169,6 +169,24 @@ def comentar_erro(ticket_id: str, email: str, descricao_erro: str) -> bool:
     return _adicionar_comentario(ticket_id, mensagem)
 
 
+def comentar_conta_excluida(ticket_id: str, email: str) -> bool:
+    """
+    Adiciona comentário informando que a conta do colaborador foi excluída.
+
+    Este comentário é adicionado após a confirmação de que o backup
+    está no Drive Compartilhado e a conta foi deletada do Google Workspace.
+
+    Args:
+        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
+        email: E-mail da conta que foi excluída
+
+    Returns:
+        True se o comentário foi adicionado com sucesso
+    """
+    mensagem = f"[Automação] Conta excluída: {email}"
+    return _adicionar_comentario(ticket_id, mensagem)
+
+
 def transicionar_ticket(ticket_id: str, id_transicao: str) -> bool:
     """
     Transiciona um ticket para outro status no workflow do Jira.

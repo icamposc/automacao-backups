@@ -27,10 +27,12 @@ logger = obter_logger("google_auth")
 # - ediscovery: Gerenciar exportações no Google Vault
 # - devstorage.read_only: Baixar arquivos exportados do Cloud Storage
 # - drive: Upload de arquivos para o Google Drive Compartilhado
+# - admin.directory.user: Gerenciar contas de usuário no Google Workspace
 SCOPES = [
     "https://www.googleapis.com/auth/ediscovery",
     "https://www.googleapis.com/auth/devstorage.read_only",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/admin.directory.user",
 ]
 
 
@@ -92,6 +94,23 @@ def obter_servico_drive():
     credenciais = _obter_credenciais()
     servico = build("drive", "v3", credentials=credenciais)
     logger.info("Cliente do Google Drive criado com sucesso")
+    return servico
+
+
+def obter_servico_admin():
+    """
+    Cria e retorna um cliente autenticado da API do Google Admin (Directory).
+
+    O Admin SDK é usado para gerenciar contas de usuário no Google Workspace,
+    incluindo a exclusão de contas de colaboradores desligados.
+
+    Returns:
+        Objeto de serviço da API do Admin Directory (v1)
+    """
+    logger.info("Criando cliente da API do Google Admin Directory...")
+    credenciais = _obter_credenciais()
+    servico = build("admin", "directory_v1", credentials=credenciais)
+    logger.info("Cliente do Google Admin Directory criado com sucesso")
     return servico
 
 

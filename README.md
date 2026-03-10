@@ -2,7 +2,7 @@
 
 Sistema de automacao de backup de dados de colaboradores desligados, integrado ao **Jira Service Management** via webhook.
 
-Exporta e-mails (Gmail/PST) e arquivos (Google Drive) atraves do **Google Vault**, compacta em ZIP e faz upload para um **Drive Compartilhado** — atualizando o ticket Jira em cada etapa do processo.
+Exporta e-mails (Gmail/PST) e arquivos (Google Drive) atraves do **Google Vault**, compacta em ZIP, faz upload para um **Drive Compartilhado** e exclui a conta do Google Workspace apos confirmacao do backup — atualizando o ticket Jira em cada etapa do processo.
 
 ---
 
@@ -42,18 +42,19 @@ Exporta e-mails (Gmail/PST) e arquivos (Google Drive) atraves do **Google Vault*
                           HTTP 200 │ (resposta imediata)
                                    │
                                    ▼
-                     ┌─────────────────────────────┐
-                     │   Thread de Background       │
-                     │                              │
-                     │  1. Notificar Jira (inicio)  │
-                     │  2. Criar exports no Vault   │
-                     │  3. Monitorar exports         │
-                     │  4. Baixar do Cloud Storage   │
-                     │  5. Compactar em ZIP          │
-                     │  6. Upload → Drive Compartilhado │
-                     │  7. Atualizar Jira (link)     │
-                     │                              │
-                     └──────────────┬───────────────┘
+                     ┌─────────────────────────────────┐
+                     │   Thread de Background           │
+                     │                                  │
+                     │  1. Notificar Jira (inicio)      │
+                     │  2. Criar exports no Vault       │
+                     │  3. Monitorar exports             │
+                     │  4. Baixar do Cloud Storage       │
+                     │  5. Compactar em ZIP              │
+                     │  6. Upload → Drive Compartilhado  │
+                     │  7. Atualizar Jira (link)         │
+                     │  8. Verificar backup + Excluir conta │
+                     │                                  │
+                     └──────────────┬───────────────────┘
                                     │
                                     ▼
                           Limpeza de temporarios
@@ -68,6 +69,7 @@ Exporta e-mails (Gmail/PST) e arquivos (Google Drive) atraves do **Google Vault*
 | **Monitoramento em paralelo** | Exports de e-mail e Drive sao monitorados em threads paralelas via `ThreadPoolExecutor` |
 | **Upload resumivel** | Suporta retentativas automaticas para arquivos grandes |
 | **Tolerancia a falhas** | Erros no Jira nao bloqueiam o backup; limpeza garantida via `finally` |
+| **Exclusao segura de conta** | Conta so e excluida apos verificacao (status 200) de que o backup existe no Drive Compartilhado |
 
 ---
 
@@ -78,7 +80,12 @@ Exporta e-mails (Gmail/PST) e arquivos (Google Drive) atraves do **Google Vault*
   - Google Vault (Matter pre-configurado)
   - Google Drive (Shared Drive)
   - Cloud Storage (leitura dos exports)
-- **Service Account** com Domain-Wide Delegation habilitada
+  - Admin SDK / Directory API (exclusao de contas)
+- **Service Account** com Domain-Wide Delegation habilitada e os escopos:
+  - `ediscovery` — exportacoes no Vault
+  - `devstorage.read_only` — download dos exports
+  - `drive` — upload para Drive Compartilhado
+  - `admin.directory.user` — exclusao de contas do Workspace
 - **Jira Service Management** com API token ativo
 - **Gunicorn** (incluido nas dependencias, para producao)
 
@@ -139,8 +146,8 @@ Edite o arquivo `.env` com os valores do seu ambiente:
 
 | Variavel | Descricao | Padrao |
 |---|---|---|
-| `POLLING_INTERVALO_SEGUNDOS` | Intervalo entre verificacoes de status do export | `60` |
-| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo maximo de espera por export (segundos) | `14400` (4h) |
+| `POLLING_INTERVALO_SEGUNDOS` | Intervalo entre verificacoes de status do export | `180` |
+| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo maximo de espera por export (segundos) | `21600` (6h) |
 | `MAX_EXPORTS_SIMULTANEOS` | Exports simultaneos no Vault (limite Google: 20) | `18` |
 
 ### Credenciais da Service Account
@@ -260,7 +267,7 @@ automacao-backups/
 │   └── __init__.py
 │
 ├── processamento/                  # Camada de orquestracao
-│   ├── orquestrador.py             #   Coordenacao das 7 etapas do backup
+│   ├── orquestrador.py             #   Coordenacao das 8 etapas do backup
 │   ├── compactacao.py              #   Compactacao ZIP com verificacao de disco
 │   ├── limpeza.py                  #   Remocao de temporarios e ZIPs
 │   └── __init__.py
@@ -269,6 +276,7 @@ automacao-backups/
 │   ├── google_auth.py              #   Autenticacao Google (Service Account)
 │   ├── vault_exportacao.py         #   Exportacao, monitoramento e download
 │   ├── drive_upload.py             #   Upload resumivel para Drive Compartilhado
+│   ├── conta_exclusao.py           #   Verificacao do backup e exclusao de conta
 │   ├── jira_atualizacao.py         #   Comentarios e transicoes no Jira
 │   └── __init__.py
 │
@@ -290,6 +298,9 @@ automacao-backups/
 │
 ├── scripts/
 │   └── iniciar_servidor.sh         # Script de inicializacao (dev/prod)
+│
+├── docs/                           # Documentacao tecnica
+│   └── webhook-e-mensagens-jira.md #   Payload do webhook e mensagens por etapa
 │
 ├── logs/                           # Logs com rotacao automatica (gitignore)
 ├── temp/                           # Arquivos temporarios (gitignore)
