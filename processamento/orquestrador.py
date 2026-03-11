@@ -48,6 +48,20 @@ from servicos.jira_atualizacao import (
 )
 from processamento.compactacao import compactar_arquivos
 from processamento.limpeza import limpar_arquivos_temporarios, limpar_arquivo_zip
+from processamento.rastreador import (
+    registrar_backup,
+    atualizar_etapa,
+    finalizar_backup,
+    STATUS_EM_ANDAMENTO,
+    STATUS_CONCLUIDO,
+    STATUS_ERRO,
+)
+from servicos.google_chat import (
+    notificar_inicio as chat_notificar_inicio,
+    notificar_sucesso as chat_notificar_sucesso,
+    notificar_erro as chat_notificar_erro,
+    notificar_conta_excluida as chat_notificar_conta_excluida,
+)
 from config.configuracoes import PASTA_TEMP
 from utils.logger import obter_logger
 
@@ -135,6 +149,10 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
 
     _marcar_inicio(email)
 
+    # Registra o backup no rastreador (Dashboard + Google Chat)
+    registrar_backup(email, ticket_id, nome)
+    chat_notificar_inicio(email, ticket_id, nome)
+
     # Pasta temporária exclusiva para este colaborador
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pasta_colaborador = PASTA_TEMP / f"{email}_{timestamp}"
@@ -144,17 +162,23 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
     nome_zip = f"{email}.zip"
     caminho_zip = PASTA_TEMP / nome_zip
 
+    # Variável para armazenar o link do Drive em caso de sucesso
+    link_drive = None
+
     try:
         # ============================================================
         # ETAPA 1: Notificar Jira que o backup iniciou
         # ============================================================
         logger.info("[ETAPA 1/8] Notificando Jira sobre início do backup...")
+        atualizar_etapa(email, 1, STATUS_EM_ANDAMENTO)
         comentar_inicio(ticket_id, email)
+        atualizar_etapa(email, 1, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 2: Criar exportações no Google Vault
         # ============================================================
         logger.info("[ETAPA 2/8] Criando exportações no Google Vault...")
+        atualizar_etapa(email, 2, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Criando exportações de E-mail e Drive no Google Vault")
 
         # Cria ambas as exportações (Email e Drive)
@@ -165,11 +189,13 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
         export_drive_id = export_drive.get("id")
 
         logger.info(f"Exportações criadas — Email ID: {export_email_id}, Drive ID: {export_drive_id}")
+        atualizar_etapa(email, 2, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 3: Monitorar exportações em paralelo
         # ============================================================
         logger.info("[ETAPA 3/8] Monitorando exportações (aguardando conclusão)...")
+        atualizar_etapa(email, 3, STATUS_EM_ANDAMENTO)
         comentar_progresso(
             ticket_id,
             "Exportações criadas. Aguardando conclusão (pode levar algumas horas)..."
@@ -202,10 +228,13 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
                     logger.error(f"Exportação falhou: {erro_export}")
                     raise
 
+        atualizar_etapa(email, 3, STATUS_CONCLUIDO)
+
         # ============================================================
         # ETAPA 4: Baixar arquivos exportados
         # ============================================================
         logger.info("[ETAPA 4/8] Baixando arquivos exportados...")
+        atualizar_etapa(email, 4, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Exportações concluídas. Baixando arquivos...")
 
         # Cria subpastas para cada tipo de exportação
@@ -217,34 +246,42 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
 
         total_arquivos = len(arquivos_email) + len(arquivos_drive)
         logger.info(f"Total de arquivos baixados: {total_arquivos}")
+        atualizar_etapa(email, 4, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 5: Compactar em .zip
         # ============================================================
         logger.info("[ETAPA 5/8] Compactando arquivos em .zip...")
+        atualizar_etapa(email, 5, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Compactando arquivos em ZIP...")
 
         caminho_zip = compactar_arquivos(pasta_colaborador, caminho_zip)
+        atualizar_etapa(email, 5, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 6: Upload para Google Drive Compartilhado
         # ============================================================
         logger.info("[ETAPA 6/8] Enviando .zip para Google Drive Compartilhado...")
+        atualizar_etapa(email, 6, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Enviando backup para Google Drive Compartilhado...")
 
         resultado_upload = fazer_upload(caminho_zip, nome_zip)
         link_drive = resultado_upload.get("webViewLink", "Link não disponível")
+        atualizar_etapa(email, 6, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 7: Atualizar Jira com resultado final
         # ============================================================
         logger.info("[ETAPA 7/8] Atualizando ticket Jira com resultado...")
+        atualizar_etapa(email, 7, STATUS_EM_ANDAMENTO)
         comentar_sucesso(ticket_id, email, link_drive)
+        atualizar_etapa(email, 7, STATUS_CONCLUIDO)
 
         # ============================================================
         # ETAPA 8: Verificar backup no Drive e excluir conta
         # ============================================================
         logger.info("[ETAPA 8/8] Verificando backup no Drive e excluindo conta...")
+        atualizar_etapa(email, 8, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Verificando backup no Drive Compartilhado antes de excluir a conta...")
 
         arquivo_id = resultado_upload.get("id")
@@ -253,6 +290,12 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
 
         logger.info(f"Conta excluída: {resultado_exclusao}")
         comentar_conta_excluida(ticket_id, email)
+        chat_notificar_conta_excluida(email, ticket_id, nome)
+        atualizar_etapa(email, 8, STATUS_CONCLUIDO)
+
+        # Finaliza o backup no rastreador com sucesso
+        finalizar_backup(email, sucesso=True, link_drive=link_drive)
+        chat_notificar_sucesso(email, ticket_id, link_drive, nome)
 
         logger.info(f"{'=' * 60}")
         logger.info(f"BACKUP CONCLUÍDO E CONTA EXCLUÍDA — {identificador}")
@@ -265,8 +308,12 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
         # ============================================================
         logger.error(f"ERRO no backup de {email}: {erro}", exc_info=True)
 
-        # Notifica o Jira sobre o erro (falha na notificação não gera exceção)
+        # Notifica o Jira e o Google Chat sobre o erro
         comentar_erro(ticket_id, email, str(erro))
+        chat_notificar_erro(email, ticket_id, str(erro), nome)
+
+        # Finaliza o backup no rastreador com erro
+        finalizar_backup(email, sucesso=False, erro_mensagem=str(erro), link_drive=link_drive)
 
         logger.error(f"{'=' * 60}")
         logger.error(f"BACKUP FALHOU — {identificador}")

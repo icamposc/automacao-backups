@@ -20,6 +20,7 @@ Histórico:
 from flask import Flask, request, jsonify
 
 from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
+from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from utils.logger import obter_logger
 
@@ -27,6 +28,9 @@ logger = obter_logger("servidor")
 
 # Cria a aplicação Flask
 app = Flask(__name__)
+
+# Registra o Blueprint do Dashboard
+app.register_blueprint(dashboard_bp)
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])
@@ -138,6 +142,10 @@ def raiz():
         "rotas": {
             "webhook": "POST /webhook/backup-desligado",
             "health_check": "GET /saude",
+            "dashboard": "GET /dashboard",
+            "api_ativos": "GET /api/backups/ativos",
+            "api_historico": "GET /api/backups/historico",
+            "api_resumo": "GET /api/backups/resumo",
         },
     }), 200
 

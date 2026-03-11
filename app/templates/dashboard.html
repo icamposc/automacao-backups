@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Automação de Backups</title>
+    <style>
+        :root {
+            --cor-fundo: #0f172a;
+            --cor-superficie: #1e293b;
+            --cor-borda: #334155;
+            --cor-texto: #e2e8f0;
+            --cor-texto-suave: #94a3b8;
+            --cor-primaria: #3b82f6;
+            --cor-sucesso: #22c55e;
+            --cor-erro: #ef4444;
+            --cor-aviso: #f59e0b;
+            --cor-andamento: #8b5cf6;
+            --cor-pendente: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--cor-fundo);
+            color: var(--cor-texto);
+            min-height: 100vh;
+        }
+
+        /* Cabeçalho */
+        .cabecalho {
+            background: var(--cor-superficie);
+            border-bottom: 1px solid var(--cor-borda);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cabecalho h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .cabecalho .status-conexao {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .indicador-online {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--cor-sucesso);
+            animation: pulsar 2s infinite;
+        }
+
+        @keyframes pulsar {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Container principal */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        /* Cards de resumo */
+        .resumo {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-resumo {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+
+        .card-resumo .rotulo {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-resumo .valor {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .card-resumo .valor.ativos { color: var(--cor-andamento); }
+        .card-resumo .valor.sucessos { color: var(--cor-sucesso); }
+        .card-resumo .valor.erros { color: var(--cor-erro); }
+        .card-resumo .valor.total { color: var(--cor-primaria); }
+
+        /* Seção */
+        .secao {
+            margin-bottom: 2rem;
+        }
+
+        .secao-titulo {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Tabela de backups */
+        .tabela-container {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: rgba(51, 65, 85, 0.5);
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--cor-texto-suave);
+            border-bottom: 1px solid var(--cor-borda);
+        }
+
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--cor-borda);
+            font-size: 0.875rem;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        /* Badge de status */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-pendente {
+            background: rgba(100, 116, 139, 0.2);
+            color: var(--cor-pendente);
+        }
+
+        .badge-em-andamento {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--cor-andamento);
+        }
+
+        .badge-concluido {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--cor-sucesso);
+        }
+
+        .badge-erro {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--cor-erro);
+        }
+
+        .badge-ponto {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .badge-em-andamento .badge-ponto {
+            animation: pulsar 1.5s infinite;
+        }
+
+        /* Barra de progresso das etapas */
+        .progresso-etapas {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .etapa-bloco {
+            width: 28px;
+            height: 8px;
+            border-radius: 4px;
+            background: var(--cor-borda);
+            position: relative;
+            cursor: pointer;
+        }
+
+        .etapa-bloco.pendente { background: var(--cor-borda); }
+        .etapa-bloco.em_andamento {
+            background: var(--cor-andamento);
+            animation: pulsar 1.5s infinite;
+        }
+        .etapa-bloco.concluido { background: var(--cor-sucesso); }
+        .etapa-bloco.erro { background: var(--cor-erro); }
+
+        .etapa-bloco .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            z-index: 10;
+            margin-bottom: 4px;
+            color: var(--cor-texto);
+        }
+
+        .etapa-bloco:hover .tooltip {
+            display: block;
+        }
+
+        /* Mensagem vazia */
+        .vazio {
+            text-align: center;
+            padding: 2rem;
+            color: var(--cor-texto-suave);
+            font-size: 0.875rem;
+        }
+
+        /* Link */
+        a {
+            color: var(--cor-primaria);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Detalhes do colaborador */
+        .detalhe-nome {
+            font-weight: 500;
+        }
+
+        .detalhe-email {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+        }
+
+        /* Atualização automática */
+        .auto-refresh {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+        }
+
+        /* Responsividade */
+        @media (max-width: 768px) {
+            .cabecalho {
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+
+            .resumo {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .tabela-container {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="cabecalho">
+        <h1>Automação de Backups — Dashboard</h1>
+        <div class="status-conexao">
+            <div class="indicador-online"></div>
+            <span>Atualização automática a cada 10s</span>
+            <span class="auto-refresh" id="ultima-atualizacao"></span>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Resumo -->
+        <section class="resumo" id="resumo">
+            <div class="card-resumo">
+                <div class="rotulo">Em Andamento</div>
+                <div class="valor ativos" id="resumo-ativos">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Concluídos</div>
+                <div class="valor sucessos" id="resumo-sucessos">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Com Erro</div>
+                <div class="valor erros" id="resumo-erros">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Total Finalizados</div>
+                <div class="valor total" id="resumo-total">0</div>
+            </div>
+        </section>
+
+        <!-- Backups Ativos -->
+        <section class="secao">
+            <h2 class="secao-titulo">
+                <span class="badge-ponto" style="background: var(--cor-andamento); width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+                Backups em Andamento
+            </h2>
+            <div class="tabela-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Ticket</th>
+                            <th>Início</th>
+                            <th>Progresso</th>
+                            <th>Etapa Atual</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-ativos">
+                        <tr><td colspan="6" class="vazio">Nenhum backup em andamento</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Histórico -->
+        <section class="secao">
+            <h2 class="secao-titulo">
+                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--cor-texto-suave);"></span>
+                Histórico Recente
+            </h2>
+            <div class="tabela-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Ticket</th>
+                            <th>Início</th>
+                            <th>Fim</th>
+                            <th>Status</th>
+                            <th>Link</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-historico">
+                        <tr><td colspan="6" class="vazio">Nenhum backup no histórico</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Intervalo de atualização automática (milissegundos)
+        const INTERVALO_ATUALIZACAO = 10000;
+
+        /**
+         * Formata uma data ISO para exibição legível
+         */
+        function formatarData(dataISO) {
+            if (!dataISO) return '—';
+            const data = new Date(dataISO);
+            return data.toLocaleString('pt-BR', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+            });
+        }
+
+        /**
+         * Retorna o texto legível para um status
+         */
+        function textoStatus(status) {
+            const mapa = {
+                'pendente': 'Pendente',
+                'em_andamento': 'Em Andamento',
+                'concluido': 'Concluído',
+                'erro': 'Erro',
+            };
+            return mapa[status] || status;
+        }
+
+        /**
+         * Cria o HTML do badge de status
+         */
+        function criarBadge(status) {
+            return `<span class="badge badge-${status}">
+                        <span class="badge-ponto"></span>
+                        ${textoStatus(status)}
+                    </span>`;
+        }
+
+        /**
+         * Cria a barra de progresso com as 8 etapas
+         */
+        function criarBarraProgresso(etapas) {
+            let html = '<div class="progresso-etapas">';
+            for (const etapa of etapas) {
+                html += `<div class="etapa-bloco ${etapa.status}">
+                            <div class="tooltip">${etapa.numero}. ${etapa.nome} — ${textoStatus(etapa.status)}</div>
+                         </div>`;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        /**
+         * Identifica a etapa atual (última em andamento ou concluída)
+         */
+        function etapaAtual(etapas) {
+            let atual = null;
+            for (const etapa of etapas) {
+                if (etapa.status === 'em_andamento') return etapa;
+                if (etapa.status === 'concluido') atual = etapa;
+            }
+            return atual;
+        }
+
+        /**
+         * Busca dados da API e atualiza o dashboard
+         */
+        async function atualizarDashboard() {
+            try {
+                const [resResumo, resAtivos, resHistorico] = await Promise.all([
+                    fetch('/api/backups/resumo'),
+                    fetch('/api/backups/ativos'),
+                    fetch('/api/backups/historico'),
+                ]);
+
+                const resumo = await resResumo.json();
+                const ativos = await resAtivos.json();
+                const historico = await resHistorico.json();
+
+                // Atualizar resumo
+                document.getElementById('resumo-ativos').textContent = resumo.ativos;
+                document.getElementById('resumo-sucessos').textContent = resumo.sucessos;
+                document.getElementById('resumo-erros').textContent = resumo.erros;
+                document.getElementById('resumo-total').textContent = resumo.total_finalizados;
+
+                // Atualizar tabela de ativos
+                const tabelaAtivos = document.getElementById('tabela-ativos');
+                if (ativos.length === 0) {
+                    tabelaAtivos.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum backup em andamento</td></tr>';
+                } else {
+                    tabelaAtivos.innerHTML = ativos.map(backup => {
+                        const atual = etapaAtual(backup.etapas);
+                        const nomeEtapa = atual ? `${atual.numero}/8 — ${atual.nome}` : 'Iniciando...';
+                        return `<tr>
+                            <td>
+                                <div class="detalhe-nome">${backup.nome}</div>
+                                <div class="detalhe-email">${backup.email}</div>
+                            </td>
+                            <td>${backup.ticket_id}</td>
+                            <td>${formatarData(backup.inicio)}</td>
+                            <td>${criarBarraProgresso(backup.etapas)}</td>
+                            <td>${nomeEtapa}</td>
+                            <td>${criarBadge(backup.status_geral)}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Atualizar tabela de histórico
+                const tabelaHistorico = document.getElementById('tabela-historico');
+                if (historico.length === 0) {
+                    tabelaHistorico.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum backup no histórico</td></tr>';
+                } else {
+                    tabelaHistorico.innerHTML = historico.map(backup => {
+                        const linkHtml = backup.link_drive
+                            ? `<a href="${backup.link_drive}" target="_blank">Abrir no Drive</a>`
+                            : '—';
+                        const erroInfo = backup.erro_mensagem
+                            ? `<br><span style="font-size:0.7rem;color:var(--cor-erro);">${backup.erro_mensagem}</span>`
+                            : '';
+                        return `<tr>
+                            <td>
+                                <div class="detalhe-nome">${backup.nome}</div>
+                                <div class="detalhe-email">${backup.email}</div>
+                            </td>
+                            <td>${backup.ticket_id}</td>
+                            <td>${formatarData(backup.inicio)}</td>
+                            <td>${formatarData(backup.fim)}</td>
+                            <td>${criarBadge(backup.status_geral)}${erroInfo}</td>
+                            <td>${linkHtml}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Atualizar timestamp
+                document.getElementById('ultima-atualizacao').textContent =
+                    `Última: ${new Date().toLocaleTimeString('pt-BR')}`;
+
+            } catch (erro) {
+                console.error('Erro ao atualizar dashboard:', erro);
+            }
+        }
+
+        // Atualização inicial e periódica
+        atualizarDashboard();
+        setInterval(atualizarDashboard, INTERVALO_ATUALIZACAO);
+    </script>
+</body>
+</html>

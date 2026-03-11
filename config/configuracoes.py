@@ -22,6 +22,16 @@ from dotenv import load_dotenv
 _RAIZ_PROJETO = Path(__file__).resolve().parent.parent
 load_dotenv(_RAIZ_PROJETO / ".env")
 
+# ============================================================
+# Certificado SSL — Ambientes corporativos (ex: Netskope)
+# ============================================================
+# Em redes com proxy/firewall que interceptam HTTPS, o bundle
+# padrão do Python (certifi) não reconhece o certificado corporativo.
+# Configuramos o REQUESTS_CA_BUNDLE para usar os certificados do sistema.
+_CA_BUNDLE_SISTEMA = "/etc/ssl/certs/ca-certificates.crt"
+if not os.getenv("REQUESTS_CA_BUNDLE") and Path(_CA_BUNDLE_SISTEMA).exists():
+    os.environ["REQUESTS_CA_BUNDLE"] = _CA_BUNDLE_SISTEMA
+
 
 def _obter_variavel(nome: str, obrigatoria: bool = True, padrao: str = None) -> str:
     """
@@ -76,6 +86,11 @@ JIRA_WEBHOOK_SEGREDO = _obter_variavel("JIRA_WEBHOOK_SEGREDO", obrigatoria=False
 # ============================================================
 SERVIDOR_PORTA = int(_obter_variavel("SERVIDOR_PORTA", obrigatoria=False, padrao="5000"))
 SERVIDOR_HOST = _obter_variavel("SERVIDOR_HOST", obrigatoria=False, padrao="0.0.0.0")
+
+# ============================================================
+# Google Chat — Webhook para notificações
+# ============================================================
+GOOGLE_CHAT_WEBHOOK_URL = _obter_variavel("GOOGLE_CHAT_WEBHOOK_URL", obrigatoria=False, padrao="")
 
 # ============================================================
 # Limites de processamento
