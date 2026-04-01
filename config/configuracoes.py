@@ -31,6 +31,8 @@ load_dotenv(_RAIZ_PROJETO / ".env")
 _CA_BUNDLE_SISTEMA = "/etc/ssl/certs/ca-certificates.crt"
 if not os.getenv("REQUESTS_CA_BUNDLE") and Path(_CA_BUNDLE_SISTEMA).exists():
     os.environ["REQUESTS_CA_BUNDLE"] = _CA_BUNDLE_SISTEMA
+if not os.getenv("SSL_CERT_FILE") and Path(_CA_BUNDLE_SISTEMA).exists():
+    os.environ["SSL_CERT_FILE"] = _CA_BUNDLE_SISTEMA
 
 
 def _obter_variavel(nome: str, obrigatoria: bool = True, padrao: str = None) -> str:
@@ -80,6 +82,11 @@ JIRA_URL_BASE = _obter_variavel("JIRA_URL_BASE")
 JIRA_EMAIL = _obter_variavel("JIRA_EMAIL")
 JIRA_API_TOKEN = _obter_variavel("JIRA_API_TOKEN")
 JIRA_WEBHOOK_SEGREDO = _obter_variavel("JIRA_WEBHOOK_SEGREDO", obrigatoria=False, padrao="")
+JIRA_TRANSICAO_EM_ANALISE = _obter_variavel("JIRA_TRANSICAO_EM_ANALISE", obrigatoria=False, padrao="")
+JIRA_TRANSICAO_RESOLVIDO = _obter_variavel("JIRA_TRANSICAO_RESOLVIDO", obrigatoria=False, padrao="")
+# Cloud ID da instância Atlassian (necessário para a API de Formulários)
+# Obtido em: https://<sua-instancia>.atlassian.net/_edge/tenant_info
+JIRA_CLOUD_ID = _obter_variavel("JIRA_CLOUD_ID", obrigatoria=False, padrao="")
 
 # ============================================================
 # Servidor Flask

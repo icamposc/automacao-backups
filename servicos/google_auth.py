@@ -14,6 +14,9 @@ Histórico:
 ============================================================
 """
 
+import os
+import httplib2
+import google_auth_httplib2
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.cloud import storage
@@ -34,6 +37,19 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/admin.directory.user",
 ]
+
+
+def _obter_http_autorizado(credenciais: service_account.Credentials) -> google_auth_httplib2.AuthorizedHttp:
+    """
+    Cria um cliente HTTP autorizado com o bundle SSL correto.
+
+    O httplib2 não lê REQUESTS_CA_BUNDLE automaticamente, por isso
+    o bundle é passado explicitamente — necessário em ambientes com
+    proxy corporativo (ex: Netskope) que interceptam conexões HTTPS.
+    """
+    ca_bundle = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE")
+    http = httplib2.Http(ca_certs=ca_bundle) if ca_bundle else httplib2.Http()
+    return google_auth_httplib2.AuthorizedHttp(credenciais, http=http)
 
 
 def _obter_credenciais() -> service_account.Credentials:
@@ -75,7 +91,8 @@ def obter_servico_vault():
     """
     logger.info("Criando cliente da API do Google Vault...")
     credenciais = _obter_credenciais()
-    servico = build("vault", "v1", credentials=credenciais)
+    http = _obter_http_autorizado(credenciais)
+    servico = build("vault", "v1", http=http)
     logger.info("Cliente do Google Vault criado com sucesso")
     return servico
 
@@ -92,7 +109,8 @@ def obter_servico_drive():
     """
     logger.info("Criando cliente da API do Google Drive...")
     credenciais = _obter_credenciais()
-    servico = build("drive", "v3", credentials=credenciais)
+    http = _obter_http_autorizado(credenciais)
+    servico = build("drive", "v3", http=http)
     logger.info("Cliente do Google Drive criado com sucesso")
     return servico
 
@@ -109,7 +127,8 @@ def obter_servico_admin():
     """
     logger.info("Criando cliente da API do Google Admin Directory...")
     credenciais = _obter_credenciais()
-    servico = build("admin", "directory_v1", credentials=credenciais)
+    http = _obter_http_autorizado(credenciais)
+    servico = build("admin", "directory_v1", http=http)
     logger.info("Cliente do Google Admin Directory criado com sucesso")
     return servico
 

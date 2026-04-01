@@ -18,7 +18,7 @@ import hmac
 import hashlib
 
 from config.configuracoes import JIRA_WEBHOOK_SEGREDO
-from utils.validacoes import validar_payload_webhook
+from utils.validacoes import validar_payload_webhook, extrair_email_descricao, extrair_nome_descricao
 from utils.logger import obter_logger
 
 logger = obter_logger("webhook_handler")
@@ -74,13 +74,13 @@ def extrair_dados_webhook(payload: dict) -> dict | None:
     """
     Extrai e valida os dados necessários do payload do webhook do Jira.
 
-    O webhook do "Automation for Jira" deve enviar um JSON com
-    pelo menos os seguintes campos:
-    - email_colaborador: E-mail do colaborador desligado
-    - ticket_id: Chave do ticket no Jira (ex: "SPN-123")
+    O webhook do "Automation for Jira" envia um JSON com:
+    - descricao: Texto completo da descrição do chamado SPN (campo {{issue.description}})
+    - ticket_id: Chave do ticket no Jira (campo {{issue.key}}, ex: "SPN-123")
 
-    Campos opcionais que podem enriquecer o processo:
-    - nome_colaborador: Nome completo do colaborador
+    O e-mail e o nome do colaborador são extraídos do texto da descrição
+    via regex, pois o formulário do chamado SPN usa o formato:
+    "...Nome colaborador: NOME COMPLETOEmail Coorporativo: email@empresa.com.br..."
 
     Args:
         payload: Dicionário com os dados recebidos do webhook
@@ -97,17 +97,18 @@ def extrair_dados_webhook(payload: dict) -> dict | None:
     logger.info("Processando payload do webhook...")
     logger.debug(f"Payload recebido: {payload}")
 
-    # Valida o payload usando as funções de validação
+    # Valida o payload e extrai o e-mail da descrição
     valido, mensagem_erro = validar_payload_webhook(payload)
     if not valido:
         logger.error(f"Payload inválido: {mensagem_erro}")
         return None
 
-    # Extrai os dados necessários
+    descricao = payload["descricao"]
+
     dados = {
-        "email": payload["email_colaborador"].strip().lower(),
+        "email": extrair_email_descricao(descricao).strip().lower(),
         "ticket_id": payload["ticket_id"].strip(),
-        "nome": payload.get("nome_colaborador", "").strip() or None,
+        "nome": extrair_nome_descricao(descricao),
     }
 
     logger.info(

@@ -49,6 +49,68 @@ MAX_TENTATIVAS = 3
 INTERVALO_RETRY = 30
 
 
+def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
+    """
+    Verifica se já existe uma exportação válida (IN_PROGRESS ou COMPLETED)
+    no Vault para o e-mail e tipo informados.
+
+    Evita criar exports duplicados quando o processo é reexecutado após
+    uma falha em etapa posterior (ex: upload, compactação).
+
+    O tipo de exportação é identificado pelo prefixo do nome:
+    - "Email_{email}_" para exportações de e-mail
+    - "Drive_{email}_" para exportações de Drive
+
+    Args:
+        email: E-mail do colaborador
+        tipo: "E-MAIL" ou "DRIVE"
+
+    Returns:
+        Dicionário com os dados da exportação mais recente válida,
+        ou None se não houver nenhuma aproveitável.
+    """
+    prefixo = f"Email_{email}_" if tipo == "E-MAIL" else f"Drive_{email}_"
+    status_validos = {"IN_PROGRESS", "COMPLETED"}
+
+    logger.info(f"Verificando exports existentes no Vault para: {email} (tipo: {tipo})")
+
+    try:
+        servico = obter_servico_vault()
+        resposta = (
+            servico.matters()
+            .exports()
+            .list(matterId=VAULT_MATTER_ID, pageSize=50)
+            .execute()
+        )
+
+        exports = resposta.get("exports", [])
+        candidatos = [
+            e for e in exports
+            if e.get("name", "").startswith(prefixo)
+            and e.get("status") in status_validos
+        ]
+
+        if not candidatos:
+            logger.info(f"Nenhum export existente aproveitável para {email} (tipo: {tipo})")
+            return None
+
+        # Usa o mais recente (maior createTime)
+        mais_recente = max(candidatos, key=lambda e: e.get("createTime", ""))
+        logger.info(
+            f"Export existente encontrado — "
+            f"Nome: {mais_recente.get('name')}, "
+            f"ID: {mais_recente.get('id')}, "
+            f"Status: {mais_recente.get('status')}"
+        )
+        # Marca como reaproveitado para o orquestrador não liberar o semáforo
+        mais_recente["_reaproveitado"] = True
+        return mais_recente
+
+    except Exception as erro:
+        logger.warning(f"Erro ao buscar exports existentes: {erro} — criando novo export")
+        return None
+
+
 def criar_exportacao_email(email: str) -> dict:
     """
     Cria uma exportação de e-mails (Gmail) no Google Vault para o
@@ -67,6 +129,12 @@ def criar_exportacao_email(email: str) -> dict:
         Exception: Se falhar após todas as tentativas de retry
     """
     logger.info(f"Criando exportação de E-MAIL para: {email}")
+
+    # Verifica se já existe um export válido antes de criar um novo
+    existente = buscar_exportacao_existente(email, "E-MAIL")
+    if existente:
+        logger.info(f"Reaproveitando export de E-MAIL existente: {existente.get('id')}")
+        return existente
 
     # Timestamp para nome único da exportação
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -115,6 +183,12 @@ def criar_exportacao_drive(email: str) -> dict:
         Exception: Se falhar após todas as tentativas de retry
     """
     logger.info(f"Criando exportação de DRIVE para: {email}")
+
+    # Verifica se já existe um export válido antes de criar um novo
+    existente = buscar_exportacao_existente(email, "DRIVE")
+    if existente:
+        logger.info(f"Reaproveitando export de DRIVE existente: {existente.get('id')}")
+        return existente
 
     # Timestamp para nome único da exportação
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -207,7 +281,7 @@ def _criar_exportacao_com_retry(corpo: dict, email: str, tipo: str) -> dict:
             raise
 
 
-def monitorar_exportacao(export_id: str) -> dict:
+def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dict:
     """
     Monitora o status de uma exportação no Vault até que ela seja
     concluída (COMPLETED) ou falhe (FAILED).
@@ -276,10 +350,11 @@ def monitorar_exportacao(export_id: str) -> dict:
             time.sleep(POLLING_INTERVALO_SEGUNDOS)
 
     finally:
-        # SEMPRE libera o semáforo quando terminar o monitoramento
-        # (seja por sucesso, falha ou timeout)
-        _semaforo_exports.release()
-        logger.debug(f"Semáforo liberado para export {export_id}")
+        # Libera o semáforo apenas se ele foi adquirido por este processo.
+        # Exports reaproveitados (buscar_exportacao_existente) não adquirem semáforo.
+        if semaforo_adquirido:
+            _semaforo_exports.release()
+            logger.debug(f"Semáforo liberado para export {export_id}")
 
 
 def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:

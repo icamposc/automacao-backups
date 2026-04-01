@@ -36,6 +36,7 @@ from servicos.vault_exportacao import (
     criar_exportacao_drive,
     monitorar_exportacao,
     baixar_exportacao,
+    buscar_exportacao_existente,
 )
 from servicos.drive_upload import fazer_upload
 from servicos.conta_exclusao import verificar_e_deletar_conta
@@ -45,7 +46,11 @@ from servicos.jira_atualizacao import (
     comentar_sucesso,
     comentar_erro,
     comentar_conta_excluida,
+    transicionar_ticket,
+    transicionar_resolvido,
+    submeter_formularios_pendentes,
 )
+from config.configuracoes import JIRA_TRANSICAO_EM_ANALISE, JIRA_TRANSICAO_RESOLVIDO
 from processamento.compactacao import compactar_arquivos
 from processamento.limpeza import limpar_arquivos_temporarios, limpar_arquivo_zip
 from processamento.rastreador import (
@@ -61,6 +66,7 @@ from servicos.google_chat import (
     notificar_sucesso as chat_notificar_sucesso,
     notificar_erro as chat_notificar_erro,
     notificar_conta_excluida as chat_notificar_conta_excluida,
+    notificar_vault_reaproveitado as chat_notificar_vault_reaproveitado,
 )
 from config.configuracoes import PASTA_TEMP
 from utils.logger import obter_logger
@@ -172,6 +178,8 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
         logger.info("[ETAPA 1/8] Notificando Jira sobre início do backup...")
         atualizar_etapa(email, 1, STATUS_EM_ANDAMENTO)
         comentar_inicio(ticket_id, email)
+        if JIRA_TRANSICAO_EM_ANALISE:
+            transicionar_ticket(ticket_id, JIRA_TRANSICAO_EM_ANALISE)
         atualizar_etapa(email, 1, STATUS_CONCLUIDO)
 
         # ============================================================
@@ -181,14 +189,43 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
         atualizar_etapa(email, 2, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Criando exportações de E-mail e Drive no Google Vault")
 
-        # Cria ambas as exportações (Email e Drive)
+        # Cria ou reaproveita exportações existentes — alerta imediato ao detectar reuso
         export_email = criar_exportacao_email(email)
-        export_drive = criar_exportacao_drive(email)
-
         export_email_id = export_email.get("id")
-        export_drive_id = export_drive.get("id")
+        email_reaproveitado = export_email.get("_reaproveitado", False)
 
-        logger.info(f"Exportações criadas — Email ID: {export_email_id}, Drive ID: {export_drive_id}")
+        if email_reaproveitado:
+            logger.info(f"Export de E-MAIL reaproveitado: {export_email_id}")
+            chat_notificar_vault_reaproveitado(
+                email=email,
+                ticket_id=ticket_id,
+                email_reaproveitado=True,
+                drive_reaproveitado=False,
+                export_email_id=export_email_id,
+                nome=nome,
+            )
+
+        export_drive = criar_exportacao_drive(email)
+        export_drive_id = export_drive.get("id")
+        drive_reaproveitado = export_drive.get("_reaproveitado", False)
+
+        if drive_reaproveitado:
+            logger.info(f"Export de DRIVE reaproveitado: {export_drive_id}")
+            chat_notificar_vault_reaproveitado(
+                email=email,
+                ticket_id=ticket_id,
+                email_reaproveitado=False,
+                drive_reaproveitado=True,
+                export_drive_id=export_drive_id,
+                nome=nome,
+            )
+
+        logger.info(
+            f"Exportações prontas — "
+            f"Email ID: {export_email_id} ({'reaproveitado' if email_reaproveitado else 'novo'}), "
+            f"Drive ID: {export_drive_id} ({'reaproveitado' if drive_reaproveitado else 'novo'})"
+        )
+
         atualizar_etapa(email, 2, STATUS_CONCLUIDO)
 
         # ============================================================
@@ -206,9 +243,14 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
         export_drive_resultado = None
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            # Submete o monitoramento das duas exportações
-            futuro_email = executor.submit(monitorar_exportacao, export_email_id)
-            futuro_drive = executor.submit(monitorar_exportacao, export_drive_id)
+            futuro_email = executor.submit(
+                monitorar_exportacao, export_email_id,
+                not email_reaproveitado  # semaforo_adquirido
+            )
+            futuro_drive = executor.submit(
+                monitorar_exportacao, export_drive_id,
+                not drive_reaproveitado  # semaforo_adquirido
+            )
 
             # Aguarda ambas terminarem
             for futuro in as_completed([futuro_email, futuro_drive]):
@@ -290,6 +332,13 @@ def _executar_backup(email: str, ticket_id: str, nome: str = None) -> None:
 
         logger.info(f"Conta excluída: {resultado_exclusao}")
         comentar_conta_excluida(ticket_id, email)
+
+        # Submete formulários pendentes antes de finalizar o ticket
+        logger.info("Submetendo formulários pendentes do ticket...")
+        submeter_formularios_pendentes(ticket_id)
+
+        if JIRA_TRANSICAO_RESOLVIDO:
+            transicionar_resolvido(ticket_id, JIRA_TRANSICAO_RESOLVIDO)
         chat_notificar_conta_excluida(email, ticket_id, nome)
         atualizar_etapa(email, 8, STATUS_CONCLUIDO)
 

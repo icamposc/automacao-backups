@@ -194,6 +194,78 @@ def notificar_erro(email: str, ticket_id: str, descricao_erro: str,
     )
 
 
+def notificar_vault_reaproveitado(
+    email: str,
+    ticket_id: str,
+    email_reaproveitado: bool,
+    drive_reaproveitado: bool,
+    export_email_id: str = None,
+    export_drive_id: str = None,
+    nome: str = None,
+) -> bool:
+    """
+    Alerta o Google Chat que exports existentes do Vault foram reaproveitados.
+
+    Isso indica que uma execução anterior falhou após criar os exports
+    (ex: erro no download, compactação ou upload) e o sistema está
+    retomando o processo sem recriar os exports.
+
+    Args:
+        email: E-mail do colaborador
+        ticket_id: Chave do ticket no Jira
+        email_reaproveitado: True se o export de e-mail foi reaproveitado
+        drive_reaproveitado: True se o export de Drive foi reaproveitado
+        export_email_id: ID do export de e-mail reaproveitado
+        export_drive_id: ID do export de Drive reaproveitado
+        nome: Nome do colaborador (opcional)
+
+    Returns:
+        True se o alerta foi enviado com sucesso
+    """
+    identificador = nome or email
+
+    if email_reaproveitado and drive_reaproveitado:
+        exports_descricao = "E-mail e Drive"
+    elif email_reaproveitado:
+        exports_descricao = "E-mail"
+    else:
+        exports_descricao = "Drive"
+
+    widgets = [
+        {"decoratedText": {"topLabel": "Colaborador", "text": identificador}},
+        {"decoratedText": {"topLabel": "E-mail", "text": email}},
+        {"decoratedText": {"topLabel": "Ticket", "text": ticket_id}},
+        {"decoratedText": {"topLabel": "Exports reaproveitados", "text": exports_descricao}},
+    ]
+
+    if email_reaproveitado and export_email_id:
+        widgets.append(
+            {"decoratedText": {"topLabel": "ID Export E-mail", "text": export_email_id}}
+        )
+    if drive_reaproveitado and export_drive_id:
+        widgets.append(
+            {"decoratedText": {"topLabel": "ID Export Drive", "text": export_drive_id}}
+        )
+
+    widgets.append(
+        {
+            "decoratedText": {
+                "topLabel": "Motivo",
+                "text": (
+                    "Exports já existiam no Vault (execução anterior falhou). "
+                    "O processo continuará usando os exports existentes."
+                ),
+            }
+        }
+    )
+
+    return _enviar_card(
+        titulo="⚠️ Vault: Exports Existentes Detectados",
+        subtitulo=f"Reaproveitando export(s) de {exports_descricao}",
+        secoes=[{"widgets": widgets}],
+    )
+
+
 def notificar_conta_excluida(email: str, ticket_id: str, nome: str = None) -> bool:
     """Notifica o Google Chat que a conta foi excluída."""
     identificador = nome or email

@@ -14,13 +14,15 @@ Histórico:
 ============================================================
 """
 
+import os
 import time
 from pathlib import Path
 
-from googleapiclient.http import MediaFileUpload
+import requests
+from google.auth.transport.requests import AuthorizedSession
 from googleapiclient.errors import HttpError
 
-from servicos.google_auth import obter_servico_drive
+from servicos.google_auth import obter_servico_drive, _obter_credenciais
 from config.configuracoes import DRIVE_PASTA_DESTINO_ID
 from utils.logger import obter_logger
 
@@ -73,52 +75,76 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
         "parents": [DRIVE_PASTA_DESTINO_ID],
     }
 
-    # Prepara o upload resumível
-    # chunksize=-1 faz upload em um único chunk (mais eficiente para arquivos < 5 GB)
-    # Para arquivos muito grandes, pode-se ajustar para chunks menores
-    media = MediaFileUpload(
-        str(caminho_arquivo),
-        mimetype="application/zip",
-        resumable=True,
-    )
-
     for tentativa in range(1, MAX_TENTATIVAS + 1):
         try:
-            servico = obter_servico_drive()
+            # Usa AuthorizedSession (requests) em vez de httplib2 para o upload.
+            # O httplib2 falha com o Netskope porque o proxy remove o header
+            # 'Location' das respostas de redirect no upload resumível.
+            # O requests lida melhor com proxies corporativos neste cenário.
+            ca_bundle = os.getenv("REQUESTS_CA_BUNDLE")
+            credenciais = _obter_credenciais()
+            sessao = AuthorizedSession(credenciais)
+            if ca_bundle:
+                sessao.verify = ca_bundle
 
-            # Cria o arquivo no Drive Compartilhado
-            # supportsAllDrives=True é OBRIGATÓRIO para Shared Drives
-            requisicao = servico.files().create(
-                body=metadados,
-                media_body=media,
-                fields="id, name, webViewLink",
-                supportsAllDrives=True,
+            # Etapa 1: Inicia a sessão de upload resumível
+            headers_inicio = {
+                "X-Upload-Content-Type": "application/zip",
+                "X-Upload-Content-Length": str(caminho_arquivo.stat().st_size),
+                "Content-Type": "application/json; charset=UTF-8",
+            }
+            import json
+            resposta_inicio = sessao.post(
+                "https://www.googleapis.com/upload/drive/v3/files"
+                f"?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink",
+                headers=headers_inicio,
+                data=json.dumps(metadados),
             )
+            resposta_inicio.raise_for_status()
+            url_upload = resposta_inicio.headers.get("Location")
 
-            # Executa o upload com acompanhamento de progresso
-            resposta = None
-            while resposta is None:
-                status_upload, resposta = requisicao.next_chunk()
-                if status_upload:
-                    progresso = int(status_upload.progress() * 100)
-                    logger.info(f"Progresso do upload: {progresso}%")
+            if not url_upload:
+                raise Exception("Google Drive não retornou URL de upload resumível")
 
-            # Upload concluído com sucesso
-            arquivo_id = resposta.get("id")
-            link = resposta.get("webViewLink", "Link não disponível")
+            logger.info(f"Sessão de upload iniciada. Enviando {tamanho_mb:.1f} MB...")
 
-            logger.info(
-                f"Upload concluído com sucesso — "
-                f"Arquivo: {nome_arquivo}, ID: {arquivo_id}"
-            )
+            # Etapa 2: Envia o arquivo em chunks de 10 MB
+            tamanho_total = caminho_arquivo.stat().st_size
+            chunk_size = 10 * 1024 * 1024  # 10 MB
+            enviado = 0
+
+            with open(caminho_arquivo, "rb") as arquivo:
+                while enviado < tamanho_total:
+                    chunk = arquivo.read(chunk_size)
+                    fim = enviado + len(chunk) - 1
+                    headers_chunk = {
+                        "Content-Range": f"bytes {enviado}-{fim}/{tamanho_total}",
+                        "Content-Type": "application/zip",
+                    }
+                    resp_chunk = sessao.put(url_upload, headers=headers_chunk, data=chunk)
+
+                    if resp_chunk.status_code in (200, 201):
+                        # Upload concluído
+                        dados = resp_chunk.json()
+                        break
+                    elif resp_chunk.status_code == 308:
+                        # Chunk aceito, continua
+                        enviado += len(chunk)
+                        progresso = int((enviado / tamanho_total) * 100)
+                        logger.info(f"Progresso do upload: {progresso}%")
+                    else:
+                        resp_chunk.raise_for_status()
+
+            arquivo_id = dados.get("id")
+            link = dados.get("webViewLink", "Link não disponível")
+
+            logger.info(f"Upload concluído com sucesso — Arquivo: {nome_arquivo}, ID: {arquivo_id}")
             logger.info(f"Link no Drive: {link}")
 
-            return resposta
+            return dados
 
-        except HttpError as erro:
-            logger.error(
-                f"Erro no upload (tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}"
-            )
+        except Exception as erro:
+            logger.error(f"Erro no upload (tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}")
             if tentativa < MAX_TENTATIVAS:
                 logger.info(f"Aguardando {INTERVALO_RETRY}s antes de tentar novamente...")
                 time.sleep(INTERVALO_RETRY)
@@ -127,7 +153,3 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
                     f"Falha no upload de {nome_arquivo} "
                     f"após {MAX_TENTATIVAS} tentativas: {erro}"
                 )
-
-        except Exception as erro:
-            logger.error(f"Erro inesperado no upload: {erro}")
-            raise

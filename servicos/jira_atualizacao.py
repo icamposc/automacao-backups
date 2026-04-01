@@ -20,7 +20,7 @@ Histórico:
 import requests
 from requests.auth import HTTPBasicAuth
 
-from config.configuracoes import JIRA_URL_BASE, JIRA_EMAIL, JIRA_API_TOKEN
+from config.configuracoes import JIRA_URL_BASE, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_CLOUD_ID
 from utils.logger import obter_logger
 
 logger = obter_logger("jira_atualizacao")
@@ -187,33 +187,27 @@ def comentar_conta_excluida(ticket_id: str, email: str) -> bool:
     return _adicionar_comentario(ticket_id, mensagem)
 
 
-def transicionar_ticket(ticket_id: str, id_transicao: str) -> bool:
+def transicionar_ticket(ticket_id: str, id_transicao: str, campos: dict = None) -> bool:
     """
     Transiciona um ticket para outro status no workflow do Jira.
 
     O ID da transição depende do workflow configurado no projeto Jira.
-    Exemplos comuns:
-    - "31" → Concluído/Done
-    - "21" → Em Progresso
-    (os IDs variam conforme a configuração do projeto)
-
     Para descobrir os IDs de transição disponíveis, use:
     GET /rest/api/3/issue/{ticket_id}/transitions
 
     Args:
         ticket_id: Chave do ticket no Jira (ex: "SPN-123")
         id_transicao: ID numérico da transição (string)
+        campos: Campos adicionais obrigatórios pela tela de transição (opcional)
 
     Returns:
         True se a transição foi executada com sucesso
     """
     url = f"{JIRA_URL_BASE}/rest/api/3/issue/{ticket_id}/transitions"
 
-    corpo = {
-        "transition": {
-            "id": id_transicao,
-        }
-    }
+    corpo = {"transition": {"id": id_transicao}}
+    if campos:
+        corpo["fields"] = campos
 
     try:
         resposta = requests.post(
@@ -226,6 +220,122 @@ def transicionar_ticket(ticket_id: str, id_transicao: str) -> bool:
     except requests.exceptions.RequestException as erro:
         logger.error(f"Erro ao transicionar ticket {ticket_id}: {erro}")
         return False
+
+
+# Campos obrigatórios na tela de transição "Resolvido" do projeto SPN
+_CAMPOS_TRANSICAO_RESOLVIDO = {
+    "resolution": {"id": "10000"},           # Done
+    "customfield_12088": {"id": "29264"},    # Tipo de atividade: Suporte
+    "customfield_11132": {"id": "27295"},    # sdn_time: Automação
+    "customfield_24413": 0,                  # Custo de Manutenção: 0
+    "customfield_11129": {"id": "24423"},    # Equipe Resolvedora: Automação
+}
+
+
+def transicionar_resolvido(ticket_id: str, id_transicao: str) -> bool:
+    """
+    Transiciona o ticket para "Resolvido" preenchendo os campos obrigatórios
+    da tela de transição do projeto SPN.
+
+    Args:
+        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
+        id_transicao: ID da transição "Resolvido"
+
+    Returns:
+        True se a transição foi executada com sucesso
+    """
+    return transicionar_ticket(ticket_id, id_transicao, campos=_CAMPOS_TRANSICAO_RESOLVIDO)
+
+
+def submeter_formularios_pendentes(ticket_id: str) -> bool:
+    """
+    Busca e submete todos os formulários pendentes (não enviados) de um ticket.
+
+    Usa a API de Formulários do Jira Cloud (ProForma):
+    - GET  https://api.atlassian.com/jira/forms/cloud/{cloudId}/issue/{issueId}/form
+    - PUT  https://api.atlassian.com/jira/forms/cloud/{cloudId}/issue/{issueId}/form/{formId}/action/submit
+
+    O header X-ExperimentalApi: opt-in é obrigatório para essa API.
+
+    Args:
+        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
+
+    Returns:
+        True se todos os formulários foram submetidos (ou não havia nenhum pendente)
+    """
+    if not JIRA_CLOUD_ID:
+        logger.warning("JIRA_CLOUD_ID não configurado — pulando submissão de formulários")
+        return True
+
+    # Primeiro obtém o ID numérico do issue (necessário para a API de Formulários)
+    try:
+        url_issue = f"{JIRA_URL_BASE}/rest/api/3/issue/{ticket_id}?fields=id"
+        resp_issue = requests.get(url_issue, headers=_HEADERS, auth=_AUTH, timeout=_TIMEOUT)
+        resp_issue.raise_for_status()
+        issue_id = resp_issue.json().get("id")
+
+        if not issue_id:
+            logger.error(f"Não foi possível obter o ID numérico do ticket {ticket_id}")
+            return False
+
+        logger.info(f"ID numérico do ticket {ticket_id}: {issue_id}")
+
+    except requests.exceptions.RequestException as erro:
+        logger.error(f"Erro ao obter ID do ticket {ticket_id}: {erro}")
+        return False
+
+    # Header obrigatório para a API experimental de Formulários
+    headers_forms = {
+        **_HEADERS,
+        "X-ExperimentalApi": "opt-in",
+    }
+
+    # Busca os formulários do issue
+    url_forms = f"https://api.atlassian.com/jira/forms/cloud/{JIRA_CLOUD_ID}/issue/{issue_id}/form"
+    try:
+        resp_forms = requests.get(url_forms, headers=headers_forms, auth=_AUTH, timeout=_TIMEOUT)
+        resp_forms.raise_for_status()
+        formularios = resp_forms.json()
+
+        if not formularios:
+            logger.info(f"Nenhum formulário encontrado no ticket {ticket_id}")
+            return True
+
+        logger.info(f"Formulários encontrados no ticket {ticket_id}: {len(formularios)}")
+
+    except requests.exceptions.RequestException as erro:
+        logger.error(f"Erro ao buscar formulários do ticket {ticket_id}: {erro}")
+        return False
+
+    # Submete os formulários que ainda não foram enviados
+    sucesso = True
+    for form in formularios:
+        form_id = form.get("id")
+        form_name = form.get("name", "sem nome")
+        form_status = form.get("status", "")
+
+        # Formulários com status "submitted" já foram enviados
+        if form_status == "submitted":
+            logger.info(f"Formulário '{form_name}' (ID: {form_id}) já foi submetido — ignorando")
+            continue
+
+        logger.info(f"Submetendo formulário '{form_name}' (ID: {form_id}, status: {form_status})...")
+        url_submit = (
+            f"https://api.atlassian.com/jira/forms/cloud/{JIRA_CLOUD_ID}"
+            f"/issue/{issue_id}/form/{form_id}/action/submit"
+        )
+        try:
+            resp_submit = requests.put(
+                url_submit, headers=headers_forms, auth=_AUTH, timeout=_TIMEOUT, json={}
+            )
+            resp_submit.raise_for_status()
+            logger.info(f"Formulário '{form_name}' submetido com sucesso")
+
+        except requests.exceptions.RequestException as erro:
+            logger.error(f"Erro ao submeter formulário '{form_name}' (ID: {form_id}): {erro}")
+            sucesso = False
+
+    return sucesso
 
 
 def obter_transicoes_disponiveis(ticket_id: str) -> list:
