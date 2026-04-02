@@ -266,6 +266,116 @@ def notificar_vault_reaproveitado(
     )
 
 
+def notificar_erro_vault_timeout(
+    email: str, ticket_id: str, export_id: str,
+    horas_decorridas: float, nome: str = None,
+) -> bool:
+    """Alerta: export do Vault não completou no tempo máximo."""
+    identificador = nome or email
+    return _enviar_card(
+        titulo="⏱️ Timeout no Google Vault",
+        subtitulo=f"Colaborador: {identificador}",
+        secoes=[{
+            "widgets": [
+                {"decoratedText": {"topLabel": "E-mail",           "text": email}},
+                {"decoratedText": {"topLabel": "Ticket",           "text": ticket_id}},
+                {"decoratedText": {"topLabel": "Export ID",        "text": export_id}},
+                {"decoratedText": {"topLabel": "Tempo decorrido",  "text": f"{horas_decorridas:.1f}h"}},
+                {"decoratedText": {"topLabel": "Ação Necessária",
+                                   "text": "Verificar o export manualmente no Google Vault e reprocessar o ticket"}},
+            ]
+        }],
+    )
+
+
+def notificar_erro_download(
+    email: str, ticket_id: str, nome_arquivo: str,
+    tentativas: int, nome: str = None,
+) -> bool:
+    """Alerta: falha ao baixar arquivos do Cloud Storage."""
+    identificador = nome or email
+    return _enviar_card(
+        titulo="📥 Erro no Download do Vault",
+        subtitulo=f"Colaborador: {identificador}",
+        secoes=[{
+            "widgets": [
+                {"decoratedText": {"topLabel": "E-mail",          "text": email}},
+                {"decoratedText": {"topLabel": "Ticket",          "text": ticket_id}},
+                {"decoratedText": {"topLabel": "Arquivo",         "text": nome_arquivo}},
+                {"decoratedText": {"topLabel": "Tentativas",      "text": str(tentativas)}},
+                {"decoratedText": {"topLabel": "Ação Necessária",
+                                   "text": "Verificar conectividade com o Cloud Storage e reprocessar o ticket"}},
+            ]
+        }],
+    )
+
+
+def notificar_erro_upload(
+    email: str, ticket_id: str, tamanho_mb: float,
+    tentativas: int, nome: str = None,
+) -> bool:
+    """Alerta: falha ao fazer upload do ZIP para o Drive."""
+    identificador = nome or email
+    return _enviar_card(
+        titulo="📤 Erro no Upload para o Drive",
+        subtitulo=f"Colaborador: {identificador}",
+        secoes=[{
+            "widgets": [
+                {"decoratedText": {"topLabel": "E-mail",          "text": email}},
+                {"decoratedText": {"topLabel": "Ticket",          "text": ticket_id}},
+                {"decoratedText": {"topLabel": "Tamanho do ZIP",  "text": f"{tamanho_mb:.1f} MB"}},
+                {"decoratedText": {"topLabel": "Tentativas",      "text": str(tentativas)}},
+                {"decoratedText": {"topLabel": "Ação Necessária",
+                                   "text": "Verificar espaço no Drive Compartilhado e reprocessar o ticket"}},
+            ]
+        }],
+    )
+
+
+def notificar_erro_exclusao_conta(
+    email: str, ticket_id: str, motivo: str = None, nome: str = None,
+) -> bool:
+    """Alerta: falha ao excluir a conta do colaborador."""
+    identificador = nome or email
+    widgets = [
+        {"decoratedText": {"topLabel": "E-mail",  "text": email}},
+        {"decoratedText": {"topLabel": "Ticket",  "text": ticket_id}},
+    ]
+    if motivo:
+        widgets.append({"decoratedText": {"topLabel": "Motivo", "text": motivo}})
+    widgets.append({
+        "decoratedText": {
+            "topLabel": "Ação Necessária",
+            "text": "Excluir a conta manualmente no Google Admin Console. O backup JÁ foi concluído.",
+        }
+    })
+    return _enviar_card(
+        titulo="🗑️ Erro ao Excluir Conta",
+        subtitulo=f"Colaborador: {identificador}",
+        secoes=[{"widgets": widgets}],
+    )
+
+
+def notificar_erro_jira(
+    email: str, ticket_id: str, operacao: str, nome: str = None,
+) -> bool:
+    """Alerta: falha em operação do Jira (não bloqueia o backup)."""
+    identificador = nome or email
+    return _enviar_card(
+        titulo="🎫 Erro na Atualização do Jira",
+        subtitulo=f"Colaborador: {identificador}",
+        secoes=[{
+            "widgets": [
+                {"decoratedText": {"topLabel": "E-mail",    "text": email}},
+                {"decoratedText": {"topLabel": "Ticket",    "text": ticket_id}},
+                {"decoratedText": {"topLabel": "Operação",  "text": operacao}},
+                {"decoratedText": {"topLabel": "Ação Necessária",
+                                   "text": "Atualizar o ticket manualmente. O backup pode estar completo."}},
+            ]
+        }],
+    )
+
+
 def notificar_conta_excluida(email: str, ticket_id: str, nome: str = None) -> bool:
     """Notifica o Google Chat que a conta foi excluída."""
     identificador = nome or email

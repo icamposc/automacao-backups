@@ -13,6 +13,7 @@ Histórico:
 ============================================================
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -64,6 +65,16 @@ PASTA_TEMP.mkdir(exist_ok=True)
 # ============================================================
 GOOGLE_CREDENCIAIS_PATH = _obter_variavel("GOOGLE_CREDENCIAIS_PATH")
 GOOGLE_ADMIN_EMAIL = _obter_variavel("GOOGLE_ADMIN_EMAIL")
+
+# Mapeamento de domínio → e-mail do admin para múltiplos domínios.
+# Formato JSON: '{"empresa.com.br":"admin@empresa.com.br","filial.com":"admin@filial.com"}'
+# Se um domínio não estiver aqui, usa GOOGLE_ADMIN_EMAIL como fallback.
+_dominios_raw = _obter_variavel("GOOGLE_DOMINIOS_ADMIN", obrigatoria=False, padrao="{}")
+try:
+    GOOGLE_DOMINIOS_ADMIN: dict = json.loads(_dominios_raw)
+except json.JSONDecodeError:
+    print(f"[AVISO] GOOGLE_DOMINIOS_ADMIN contém JSON inválido. Usando fallback: GOOGLE_ADMIN_EMAIL")
+    GOOGLE_DOMINIOS_ADMIN = {}
 
 # ============================================================
 # Google Vault — Matter para exportações
@@ -120,13 +131,23 @@ MAX_EXPORTS_SIMULTANEOS = int(
 # ============================================================
 # Limpeza de logs
 # ============================================================
-# Logs mais antigos que este número de dias serão removidos automaticamente
 LOGS_RETENCAO_DIAS = int(
     _obter_variavel("LOGS_RETENCAO_DIAS", obrigatoria=False, padrao="30")
 )
-
-# Tamanho máximo total da pasta de logs em bytes (padrão: 10 GB)
-# Ao ultrapassar, os arquivos mais antigos são removidos primeiro
 LOGS_TAMANHO_MAXIMO_BYTES = int(
     _obter_variavel("LOGS_TAMANHO_MAXIMO_GB", obrigatoria=False, padrao="10")
 ) * 1024 * 1024 * 1024
+
+# ============================================================
+# Banco de Dados SQLite
+# ============================================================
+_sqlite_path_str = _obter_variavel("SQLITE_PATH", obrigatoria=False, padrao="")
+SQLITE_PATH = (
+    Path(_sqlite_path_str) if _sqlite_path_str
+    else _RAIZ_PROJETO / "dados" / "backups.db"
+)
+
+# ============================================================
+# Redis (broker do Celery)
+# ============================================================
+REDIS_URL = _obter_variavel("REDIS_URL", obrigatoria=False, padrao="redis://localhost:6379/0")

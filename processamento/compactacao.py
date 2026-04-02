@@ -13,6 +13,7 @@ Histórico:
 ============================================================
 """
 
+import hashlib
 import zipfile
 import shutil
 from pathlib import Path
@@ -97,3 +98,29 @@ def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
     )
 
     return caminho_zip
+
+
+def calcular_sha256(caminho: Path) -> str:
+    """
+    Calcula o hash SHA256 de um arquivo lendo em blocos de 8 MB.
+
+    Leitura em blocos é necessária para arquivos grandes (dezenas de GB)
+    para não carregar o arquivo inteiro na memória.
+
+    Args:
+        caminho: Caminho do arquivo a ser verificado
+
+    Returns:
+        Hash SHA256 em formato hexadecimal (64 caracteres)
+    """
+    sha256 = hashlib.sha256()
+    bloco_size = 8 * 1024 * 1024  # 8 MB
+
+    logger.info(f"Calculando SHA256 de: {caminho.name}")
+    with open(caminho, "rb") as f:
+        for bloco in iter(lambda: f.read(bloco_size), b""):
+            sha256.update(bloco)
+
+    digest = sha256.hexdigest()
+    logger.info(f"SHA256 calculado: {digest[:16]}... ({caminho.name})")
+    return digest

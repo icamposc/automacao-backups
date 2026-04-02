@@ -2,20 +2,22 @@
 ============================================================
 Módulo do Servidor Flask — Automação de Backups
 ============================================================
-Versão: 1.0.0
-Data: 2026-02-19
+Versão: 2.0.0
+Data: 2026-04-02
 Descrição: Servidor web Flask que expõe as rotas do sistema:
-           - POST /webhook/backup-desligado → Recebe webhook do Jira
-           - GET /saude → Health check para monitoramento
-
-           O servidor recebe requisições do webhook, valida o
-           payload, e inicia o processamento em background,
-           retornando HTTP 200 imediatamente.
+           - POST /webhook/backup-desligado
+           - GET  /saude       (health check básico — compatibilidade)
+           - GET  /health      (health check detalhado)
+           - GET  /dashboard   (painel web)
 ============================================================
 Histórico:
+  2.0.0 (2026-04-02) — /health detalhado, inicialização do banco,
+                        marcação de backups interrompidos
   1.0.0 (2026-02-19) — Versão inicial
 ============================================================
 """
+
+from datetime import datetime
 
 from flask import Flask, request, jsonify
 
@@ -23,6 +25,7 @@ from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
 from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from processamento.limpeza import limpar_logs_antigos
+from dados.banco import inicializar_banco, marcar_backups_interrompidos
 from utils.logger import obter_logger
 
 logger = obter_logger("servidor")
@@ -33,43 +36,26 @@ app = Flask(__name__)
 # Registra o Blueprint do Dashboard
 app.register_blueprint(dashboard_bp)
 
-# Limpeza de logs antigos na inicialização
+# ── Inicialização na carga do módulo ───────────────────────────────────────
+inicializar_banco()
+marcar_backups_interrompidos()
 limpar_logs_antigos()
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])
 def receber_webhook():
     """
-    Rota que recebe o webhook do Jira Service Management.
+    Recebe o webhook do Jira Service Management.
 
-    Fluxo:
-    1. Valida a assinatura do webhook (se configurada)
-    2. Extrai e valida os dados do payload (e-mail, ticket ID)
-    3. Verifica se já existe processamento ativo para o mesmo e-mail
-    4. Inicia o backup em uma thread de background
+    1. Valida a assinatura HMAC
+    2. Extrai e valida dados do payload
+    3. Verifica se já existe processamento ativo para o e-mail
+    4. Enfileira o backup no Celery
     5. Retorna HTTP 200 imediatamente
-
-    Headers esperados:
-    - Content-Type: application/json
-    - X-Hub-Signature (opcional): Assinatura HMAC do webhook
-
-    Corpo esperado (JSON):
-    {
-        "email_colaborador": "usuario@empresa.com",
-        "ticket_id": "SPN-123",
-        "nome_colaborador": "Nome do Colaborador"  (opcional)
-    }
-
-    Respostas:
-    - 200: Backup iniciado com sucesso (ou já em processamento)
-    - 400: Payload inválido
-    - 401: Assinatura do webhook inválida
-    - 500: Erro interno do servidor
     """
     logger.info("Webhook recebido em /webhook/backup-desligado")
 
     try:
-        # --- Validação da assinatura do webhook ---
         assinatura = request.headers.get("X-Hub-Signature", "")
         dados_brutos = request.get_data()
 
@@ -77,24 +63,18 @@ def receber_webhook():
             logger.warning("Requisição rejeitada: assinatura inválida")
             return jsonify({"erro": "Assinatura do webhook inválida"}), 401
 
-        # --- Extração e validação do payload ---
         payload = request.get_json(silent=True)
-
         if not payload:
-            logger.warning("Requisição sem corpo JSON válido")
             return jsonify({"erro": "Corpo da requisição deve ser JSON válido"}), 400
 
         dados = extrair_dados_webhook(payload)
-
         if not dados:
-            logger.warning("Payload do webhook inválido")
             return jsonify({"erro": "Payload inválido — campos obrigatórios ausentes"}), 400
 
-        email = dados["email"]
+        email     = dados["email"]
         ticket_id = dados["ticket_id"]
-        nome = dados.get("nome")
+        nome      = dados.get("nome")
 
-        # --- Verificação de duplicatas ---
         if esta_em_processamento(email):
             logger.warning(f"Webhook duplicado ignorado — backup já em andamento para: {email}")
             return jsonify({
@@ -102,13 +82,12 @@ def receber_webhook():
                 "mensagem": f"Backup já está em andamento para {email}",
             }), 200
 
-        # --- Inicia o backup em background ---
         logger.info(f"Iniciando backup para: {email} (Ticket: {ticket_id})")
         iniciar_backup_async(email, ticket_id, nome)
 
         return jsonify({
             "status": "iniciado",
-            "mensagem": f"Backup iniciado para {email}",
+            "mensagem": f"Backup enfileirado para {email}",
             "ticket": ticket_id,
         }), 200
 
@@ -118,45 +97,94 @@ def receber_webhook():
 
 
 @app.route("/saude", methods=["GET"])
-def health_check():
-    """
-    Rota de health check para monitoramento do servidor.
-
-    Retorna HTTP 200 com informações básicas do sistema.
-    Pode ser usada por ferramentas como PRTG, Zabbix, etc.
-
-    Respostas:
-    - 200: Servidor funcionando normalmente
-    """
+def health_check_simples():
+    """Health check básico — mantido para compatibilidade com ferramentas existentes."""
     return jsonify({
         "status": "ok",
         "servico": "automacao-backups",
-        "versao": "1.0.0",
+        "versao": "2.0.0",
+    }), 200
+
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """
+    Health check detalhado com status de todos os componentes.
+
+    Resposta inclui:
+    - status dos componentes (banco, redis/celery, servidor)
+    - backups em andamento
+    - última execução registrada
+    - contadores gerais
+    """
+    from processamento.rastreador import obter_backups_ativos, obter_resumo, obter_historico
+    from config.configuracoes import REDIS_URL
+
+    componentes = {"servidor": "ok", "banco": "ok", "celery": "desconhecido"}
+    status_geral = "ok"
+
+    # Verifica o banco de dados
+    try:
+        resumo = obter_resumo()
+        componentes["banco"] = "ok"
+    except Exception as erro:
+        componentes["banco"] = f"erro: {erro}"
+        resumo = {"ativos": 0, "total_finalizados": 0, "sucessos": 0, "erros": 0}
+        status_geral = "degradado"
+
+    # Verifica Redis / Celery
+    try:
+        import redis
+        r = redis.from_url(REDIS_URL, socket_connect_timeout=2)
+        r.ping()
+        componentes["celery"] = "ok"
+    except Exception:
+        componentes["celery"] = "indisponivel"
+        status_geral = "degradado"
+
+    # Última execução
+    ultima = None
+    try:
+        historico = obter_historico(por_pagina=1)
+        if historico:
+            ultimo = historico[0]
+            ultima = {
+                "email":  ultimo.get("email"),
+                "status": ultimo.get("status_geral"),
+                "fim":    ultimo.get("fim"),
+            }
+    except Exception:
+        pass
+
+    return jsonify({
+        "status":               status_geral,
+        "versao":               "2.0.0",
+        "timestamp":            datetime.now().isoformat(),
+        "componentes":          componentes,
+        "backups_em_andamento": resumo.get("ativos", 0),
+        "resumo":               resumo,
+        "ultima_execucao":      ultima,
     }), 200
 
 
 @app.route("/", methods=["GET"])
 def raiz():
-    """
-    Rota raiz — redireciona para informações básicas.
-    """
     return jsonify({
         "servico": "Automação de Backups",
-        "versao": "1.0.0",
+        "versao": "2.0.0",
         "rotas": {
-            "webhook": "POST /webhook/backup-desligado",
-            "health_check": "GET /saude",
-            "dashboard": "GET /dashboard",
-            "api_ativos": "GET /api/backups/ativos",
+            "webhook":     "POST /webhook/backup-desligado",
+            "health":      "GET /health",
+            "health_v1":   "GET /saude",
+            "dashboard":   "GET /dashboard",
+            "api_ativos":  "GET /api/backups/ativos",
             "api_historico": "GET /api/backups/historico",
-            "api_resumo": "GET /api/backups/resumo",
+            "api_resumo":  "GET /api/backups/resumo",
         },
     }), 200
 
 
-# Permite rodar diretamente com: python -m app.servidor
 if __name__ == "__main__":
     from config.configuracoes import SERVIDOR_HOST, SERVIDOR_PORTA
-
     logger.info(f"Iniciando servidor em {SERVIDOR_HOST}:{SERVIDOR_PORTA}")
     app.run(host=SERVIDOR_HOST, port=SERVIDOR_PORTA, debug=True)

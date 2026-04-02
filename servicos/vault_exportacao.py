@@ -34,6 +34,7 @@ from config.configuracoes import (
     MAX_EXPORTS_SIMULTANEOS,
     PASTA_TEMP,
 )
+from utils.retry import calcular_backoff
 from utils.logger import obter_logger
 
 logger = obter_logger("vault_exportacao")
@@ -44,9 +45,6 @@ _semaforo_exports = threading.Semaphore(MAX_EXPORTS_SIMULTANEOS)
 
 # Número máximo de tentativas para operações que podem falhar
 MAX_TENTATIVAS = 3
-
-# Intervalo entre tentativas em caso de falha (segundos)
-INTERVALO_RETRY = 30
 
 
 def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
@@ -267,8 +265,9 @@ def _criar_exportacao_com_retry(corpo: dict, email: str, tipo: str) -> dict:
                 f"(tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}"
             )
             if tentativa < MAX_TENTATIVAS:
-                logger.info(f"Aguardando {INTERVALO_RETRY}s antes de tentar novamente...")
-                time.sleep(INTERVALO_RETRY)
+                espera = calcular_backoff(tentativa)
+                logger.info(f"Aguardando {espera}s antes de tentar novamente (backoff exponencial)...")
+                time.sleep(espera)
             else:
                 raise Exception(
                     f"Falha ao criar exportação {tipo} para {email} "
@@ -433,7 +432,9 @@ def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:
                     f"(tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}"
                 )
                 if tentativa < MAX_TENTATIVAS:
-                    time.sleep(INTERVALO_RETRY)
+                    espera = calcular_backoff(tentativa)
+                    logger.info(f"Aguardando {espera}s antes de tentar novamente (backoff exponencial)...")
+                    time.sleep(espera)
                 else:
                     raise Exception(
                         f"Falha ao baixar {nome_arquivo_local} "

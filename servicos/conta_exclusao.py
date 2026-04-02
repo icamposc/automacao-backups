@@ -105,7 +105,7 @@ def deletar_conta(email: str) -> dict:
     logger.info(f"Iniciando exclusão da conta Google Workspace: {email}")
 
     try:
-        servico = obter_servico_admin()
+        servico = obter_servico_admin(email)
 
         # Deleta a conta do usuário — operação irreversível
         servico.users().delete(userKey=email).execute()

@@ -1,0 +1,128 @@
+"""
+============================================================
+Módulo de Banco de Dados SQLite — Automação de Backups
+============================================================
+Versão: 1.0.0
+Data: 2026-04-02
+Descrição: Inicializa e gerencia o banco de dados SQLite
+           local. Utiliza WAL mode para suportar múltiplas
+           conexões simultâneas (Celery + Flask).
+           Cada thread/processo obtém sua própria conexão
+           via threading.local().
+============================================================
+"""
+
+import sqlite3
+import threading
+from utils.logger import obter_logger
+
+logger = obter_logger("banco")
+
+# Armazenamento de conexões por thread
+_local = threading.local()
+
+
+def obter_conexao() -> sqlite3.Connection:
+    """
+    Retorna a conexão SQLite da thread atual.
+    Cria uma nova conexão se ainda não existir para esta thread.
+    """
+    if not hasattr(_local, "conn") or _local.conn is None:
+        from config.configuracoes import SQLITE_PATH
+        SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(SQLITE_PATH), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        _local.conn = conn
+    return _local.conn
+
+
+def inicializar_banco() -> None:
+    """
+    Cria as tabelas do banco se ainda não existirem.
+    Deve ser chamada uma vez na inicialização do servidor.
+    """
+    from config.configuracoes import SQLITE_PATH
+    SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(SQLITE_PATH))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS backups (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            email           TEXT    NOT NULL,
+            ticket_id       TEXT    NOT NULL,
+            nome            TEXT,
+            status_geral    TEXT    NOT NULL DEFAULT 'em_andamento',
+            inicio          TEXT    NOT NULL,
+            fim             TEXT,
+            link_drive      TEXT,
+            sha256_zip      TEXT,
+            erro_mensagem   TEXT,
+            celery_task_id  TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS etapas_backup (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            backup_id   INTEGER NOT NULL,
+            numero      INTEGER NOT NULL,
+            nome        TEXT    NOT NULL,
+            descricao   TEXT,
+            status      TEXT    NOT NULL DEFAULT 'pendente',
+            inicio      TEXT,
+            fim         TEXT,
+            FOREIGN KEY (backup_id) REFERENCES backups(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_backups_email  ON backups(email);
+        CREATE INDEX IF NOT EXISTS idx_backups_status ON backups(status_geral);
+        CREATE INDEX IF NOT EXISTS idx_etapas_backup  ON etapas_backup(backup_id);
+    """)
+
+    conn.commit()
+    conn.close()
+    logger.info(f"Banco de dados inicializado: {SQLITE_PATH}")
+
+
+def fechar_conexao_thread() -> None:
+    """
+    Fecha e remove a conexão SQLite da thread atual.
+    Usado principalmente em testes para garantir isolamento entre casos.
+    """
+    if hasattr(_local, "conn") and _local.conn is not None:
+        try:
+            _local.conn.close()
+        except Exception:
+            pass
+        _local.conn = None
+
+
+def marcar_backups_interrompidos() -> int:
+    """
+    Marca como erro todos os backups que estavam 'em_andamento'
+    antes do restart. Eles não têm mais um worker executando.
+
+    Returns:
+        Número de backups marcados como erro.
+    """
+    from config.configuracoes import SQLITE_PATH
+    conn = sqlite3.connect(str(SQLITE_PATH))
+    cursor = conn.execute(
+        """UPDATE backups
+           SET status_geral  = 'erro',
+               fim           = datetime('now', 'localtime'),
+               erro_mensagem = 'Backup interrompido por reinício do servidor'
+           WHERE status_geral = 'em_andamento'"""
+    )
+    afetados = cursor.rowcount
+    conn.commit()
+    conn.close()
+    if afetados:
+        logger.warning(
+            f"{afetados} backup(s) interrompido(s) pelo restart foram marcados como erro"
+        )
+    return afetados

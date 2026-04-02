@@ -14,6 +14,7 @@ Histórico:
 ============================================================
 """
 
+import json
 import os
 import time
 from pathlib import Path
@@ -24,6 +25,7 @@ from googleapiclient.errors import HttpError
 
 from servicos.google_auth import obter_servico_drive, _obter_credenciais
 from config.configuracoes import DRIVE_PASTA_DESTINO_ID
+from utils.retry import calcular_backoff
 from utils.logger import obter_logger
 
 logger = obter_logger("drive_upload")
@@ -31,11 +33,8 @@ logger = obter_logger("drive_upload")
 # Número máximo de tentativas para upload
 MAX_TENTATIVAS = 3
 
-# Intervalo entre tentativas em caso de falha (segundos)
-INTERVALO_RETRY = 30
 
-
-def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
+def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = None) -> dict:
     """
     Faz upload de um arquivo para o Google Drive Compartilhado.
 
@@ -74,6 +73,10 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
         "name": nome_arquivo,
         "parents": [DRIVE_PASTA_DESTINO_ID],
     }
+    if sha256:
+        metadados["description"] = f"SHA256: {sha256}"
+        metadados["appProperties"] = {"sha256": sha256}
+        logger.info(f"SHA256 será salvo como metadado no Drive: {sha256[:16]}...")
 
     for tentativa in range(1, MAX_TENTATIVAS + 1):
         try:
@@ -93,7 +96,6 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
                 "X-Upload-Content-Length": str(caminho_arquivo.stat().st_size),
                 "Content-Type": "application/json; charset=UTF-8",
             }
-            import json
             resposta_inicio = sessao.post(
                 "https://www.googleapis.com/upload/drive/v3/files"
                 f"?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink",
@@ -146,8 +148,9 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None) -> dict:
         except Exception as erro:
             logger.error(f"Erro no upload (tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}")
             if tentativa < MAX_TENTATIVAS:
-                logger.info(f"Aguardando {INTERVALO_RETRY}s antes de tentar novamente...")
-                time.sleep(INTERVALO_RETRY)
+                espera = calcular_backoff(tentativa)
+                logger.info(f"Aguardando {espera}s antes de tentar novamente (backoff exponencial)...")
+                time.sleep(espera)
             else:
                 raise Exception(
                     f"Falha no upload de {nome_arquivo} "
