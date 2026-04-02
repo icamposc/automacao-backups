@@ -22,6 +22,7 @@ from flask import Flask, request, jsonify
 from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
 from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
+from processamento.limpeza import limpar_logs_antigos
 from utils.logger import obter_logger
 
 logger = obter_logger("servidor")
@@ -31,6 +32,9 @@ app = Flask(__name__)
 
 # Registra o Blueprint do Dashboard
 app.register_blueprint(dashboard_bp)
+
+# Limpeza de logs antigos na inicialização
+limpar_logs_antigos()
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])

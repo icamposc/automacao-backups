@@ -116,3 +116,17 @@ TIMEOUT_MAXIMO_SEGUNDOS = int(
 MAX_EXPORTS_SIMULTANEOS = int(
     _obter_variavel("MAX_EXPORTS_SIMULTANEOS", obrigatoria=False, padrao="18")
 )
+
+# ============================================================
+# Limpeza de logs
+# ============================================================
+# Logs mais antigos que este número de dias serão removidos automaticamente
+LOGS_RETENCAO_DIAS = int(
+    _obter_variavel("LOGS_RETENCAO_DIAS", obrigatoria=False, padrao="30")
+)
+
+# Tamanho máximo total da pasta de logs em bytes (padrão: 10 GB)
+# Ao ultrapassar, os arquivos mais antigos são removidos primeiro
+LOGS_TAMANHO_MAXIMO_BYTES = int(
+    _obter_variavel("LOGS_TAMANHO_MAXIMO_GB", obrigatoria=False, padrao="10")
+) * 1024 * 1024 * 1024
