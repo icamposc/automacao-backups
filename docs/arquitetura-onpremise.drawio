@@ -1,161 +1,214 @@
 <mxfile host="app.diagrams.net" modified="2026-04-02T00:00:00.000Z" agent="Claude" version="21.0.0" type="device">
   <diagram name="Arquitetura On-Premise v2.0" id="arquitetura-onpremise-v2">
-    <mxGraphModel dx="1800" dy="960" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1300" math="0" shadow="0">
+    <mxGraphModel dx="1800" dy="960" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- ═══════════════════════════════════════════════════════ -->
-        <!-- JIRA CLOUD                                              -->
+        <!-- JIRA CLOUD  (coluna esquerda)                          -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <mxCell id="jira-bg" value="☁️  Jira Cloud" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#1565c0;fontColor=#0d47a1;fontStyle=1;fontSize=13;rounded=1;" vertex="1" parent="1">
-          <mxGeometry x="30" y="200" width="300" height="280" as="geometry" />
+          <mxGeometry x="20" y="140" width="340" height="340" as="geometry" />
         </mxCell>
 
         <mxCell id="jira-automation" value="⚡ Automation for Jira&#xa;• Cria chamado SPN filho&#xa;  (Backup desligamento)&#xa;• Dispara webhook POST&#xa;  ao fechar ACCESS pai" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#00307a;fontSize=11;" vertex="1" parent="jira-bg">
-          <mxGeometry x="20" y="50" width="125" height="200" as="geometry" />
+          <mxGeometry x="15" y="50" width="145" height="270" as="geometry" />
         </mxCell>
 
         <mxCell id="jira-api" value="🔧 Jira REST API v3&#xa;• Comentários&#xa;• Transições de status&#xa;• Formulários ProForma&#xa;  (X-ExperimentalApi)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#00307a;fontSize=11;" vertex="1" parent="jira-bg">
-          <mxGeometry x="155" y="50" width="125" height="200" as="geometry" />
+          <mxGeometry x="175" y="50" width="145" height="270" as="geometry" />
         </mxCell>
 
         <!-- ═══════════════════════════════════════════════════════ -->
-        <!-- SERVIDOR ON-PREMISE                                     -->
+        <!-- LEGENDA  (coluna esquerda, abaixo do Jira)             -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <mxCell id="legend-bg" value="Legenda" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="520" width="340" height="320" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg1" value="" style="fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="38" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1-txt" value="Flask — Componentes HTTP" style="text;fontSize=11;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="38" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg2" value="" style="fillColor=#ffcccc;strokeColor=#cc0000;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="70" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2-txt" value="Redis (broker Celery) — NOVO" style="text;fontSize=11;fontStyle=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="70" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg3" value="" style="fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="102" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3-txt" value="Worker Celery / Processamento" style="text;fontSize=11;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="102" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg4" value="" style="fillColor=#fce4ec;strokeColor=#c62828;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="134" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4-txt" value="APIs Google Cloud (externas)" style="text;fontSize=11;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="134" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg5" value="" style="fillColor=#fff8e1;strokeColor=#f57f17;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="166" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5-txt" value="Armazenamento local (disco)" style="text;fontSize=11;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="166" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg6" value="" style="fillColor=#e1f0ff;strokeColor=#1565c0;rounded=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="198" width="28" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6-txt" value="SQLite (persistência) — NOVO" style="text;fontSize=11;fontStyle=1;" vertex="1" parent="legend-bg">
+          <mxGeometry x="55" y="198" width="270" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="leg7-txt" value="--- linha tracejada = leitura / auth" style="text;fontSize=10;fontColor=#999999;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="244" width="300" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="leg8-txt" value="─── linha sólida = escrita / chamada" style="text;fontSize=10;fontColor=#999999;" vertex="1" parent="legend-bg">
+          <mxGeometry x="15" y="268" width="300" height="18" as="geometry" />
+        </mxCell>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- SERVIDOR ON-PREMISE  (coluna central)                  -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <mxCell id="server-bg" value="🖥️  Servidor On-Premise (Ubuntu 22.04 LTS)" style="swimlane;startSize=30;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontStyle=1;fontSize=14;swimlaneLine=1;rounded=1;" vertex="1" parent="1">
-          <mxGeometry x="375" y="60" width="1200" height="1140" as="geometry" />
+          <mxGeometry x="410" y="50" width="1580" height="1390" as="geometry" />
         </mxCell>
 
-        <!-- Firewall -->
+        <!-- ── Linha 0: Firewall (ponto de entrada, centralizado acima do Flask) ── -->
         <mxCell id="firewall" value="🔒 Firewall&#xa;Porta 5000&#xa;→ Jira Cloud" style="shape=mxgraph.cisco.firewalls.firewall;fillColor=#f8cecc;strokeColor=#b85450;fontColor=#6c0000;fontStyle=1;fontSize=11;" vertex="1" parent="server-bg">
-          <mxGeometry x="560" y="50" width="80" height="70" as="geometry" />
+          <mxGeometry x="240" y="50" width="100" height="75" as="geometry" />
         </mxCell>
 
-        <!-- ─── Gunicorn + Flask ─────────────────────────────────── -->
+        <!-- ── Linha 1: Flask | Redis | Celery ── -->
         <mxCell id="flask-bg" value="Gunicorn + Flask  (porta 5000)" style="swimlane;startSize=25;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#00307a;fontStyle=1;fontSize=12;rounded=1;" vertex="1" parent="server-bg">
-          <mxGeometry x="20" y="160" width="450" height="260" as="geometry" />
+          <mxGeometry x="20" y="175" width="540" height="295" as="geometry" />
         </mxCell>
 
         <mxCell id="webhook-handler" value="📥 Webhook Handler&#xa;• Valida HMAC-SHA256&#xa;• Extrai e-mail via regex&#xa;• Verifica duplicata no DB&#xa;• Enfileira: .delay()" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#00307a;fontSize=11;" vertex="1" parent="flask-bg">
-          <mxGeometry x="15" y="40" width="200" height="195" as="geometry" />
+          <mxGeometry x="20" y="45" width="240" height="230" as="geometry" />
         </mxCell>
 
         <mxCell id="dashboard" value="📊 Dashboard + Health&#xa;GET /dashboard&#xa;  → lê SQLite (paginado)&#xa;GET /health&#xa;  → banco, Redis, ativos&#xa;GET /saude (compat.)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#00307a;fontSize=11;" vertex="1" parent="flask-bg">
-          <mxGeometry x="230" y="40" width="200" height="195" as="geometry" />
+          <mxGeometry x="280" y="45" width="240" height="230" as="geometry" />
         </mxCell>
 
-        <!-- ─── Redis ─────────────────────────────────────────────── -->
-        <mxCell id="redis" value="🔴 Redis  (localhost:6379)&#xa;Broker + Backend do Celery&#xa;Fila de tarefas de backup" style="rounded=1;fillColor=#ffcccc;strokeColor=#cc0000;fontColor=#660000;fontStyle=1;fontSize=11;" vertex="1" parent="server-bg">
-          <mxGeometry x="530" y="210" width="260" height="100" as="geometry" />
+        <mxCell id="redis" value="🔴 Redis  (localhost:6379)&#xa;&#xa;Broker + Backend do Celery&#xa;Fila de tarefas de backup" style="rounded=1;fillColor=#ffcccc;strokeColor=#cc0000;fontColor=#660000;fontStyle=1;fontSize=12;" vertex="1" parent="server-bg">
+          <mxGeometry x="610" y="245" width="300" height="130" as="geometry" />
         </mxCell>
 
-        <!-- ─── Celery Worker ──────────────────────────────────────── -->
         <mxCell id="celery-bg" value="⚙️  Celery Worker  (--concurrency=1)" style="swimlane;startSize=25;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#7a4700;fontStyle=1;fontSize=12;rounded=1;" vertex="1" parent="server-bg">
-          <mxGeometry x="850" y="160" width="330" height="280" as="geometry" />
+          <mxGeometry x="960" y="175" width="600" height="295" as="geometry" />
         </mxCell>
 
-        <mxCell id="orchestrator" value="🧭 Orquestrador&#xa;8 etapas em sequência:&#xa;1. Notifica Jira (início)&#xa;2. Cria exports Vault&#xa;3. Monitora (paralelo)&#xa;4. Baixa arquivos&#xa;5. Compacta ZIP + SHA256&#xa;6. Upload Drive&#xa;7. Atualiza Jira (fim)&#xa;8. Verifica + Exclui conta" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#7a4700;fontStyle=1;fontSize=10;" vertex="1" parent="celery-bg">
-          <mxGeometry x="15" y="40" width="300" height="220" as="geometry" />
+        <mxCell id="orchestrator" value="🧭 Orquestrador&#xa;8 etapas em sequência:&#xa;1. Notifica Jira (início)&#xa;2. Cria exports Vault&#xa;3. Monitora (paralelo)&#xa;4. Baixa arquivos&#xa;5. Compacta ZIP + SHA256&#xa;6. Upload Drive&#xa;7. Atualiza Jira (fim)&#xa;8. Verifica + Exclui conta" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#7a4700;fontStyle=1;fontSize=11;" vertex="1" parent="celery-bg">
+          <mxGeometry x="20" y="45" width="560" height="230" as="geometry" />
         </mxCell>
 
-        <!-- ─── Serviços ────────────────────────────────────────────── -->
+        <!-- ── Linha 2: Serviços de Integração ── -->
         <mxCell id="services-bg" value="Serviços — Integrações" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontStyle=1;fontSize=12;rounded=1;" vertex="1" parent="server-bg">
-          <mxGeometry x="20" y="490" width="1160" height="200" as="geometry" />
+          <mxGeometry x="20" y="530" width="1540" height="230" as="geometry" />
         </mxCell>
 
-        <mxCell id="svc-vault" value="🗄️ Vault Service&#xa;• Cria / reutiliza exports&#xa;• Monitoramento paralelo&#xa;• Download Cloud Storage&#xa;• Backoff exponencial&#xa;  30s → 60s → 120s → 300s" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="15" y="40" width="175" height="140" as="geometry" />
+        <mxCell id="svc-vault" value="🗄️ Vault Service&#xa;• Cria / reutiliza exports&#xa;• Monitoramento paralelo&#xa;• Download Cloud Storage&#xa;• Backoff exponencial&#xa;  30s→60s→120s→300s" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
+          <mxGeometry x="15" y="40" width="235" height="170" as="geometry" />
         </mxCell>
 
         <mxCell id="svc-drive" value="☁️ Drive Upload&#xa;• Upload chunked resumível&#xa;• Via AuthorizedSession&#xa;• SHA256 nos metadados&#xa;• description + appProperties&#xa;• Backoff exponencial" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="205" y="40" width="175" height="140" as="geometry" />
+          <mxGeometry x="265" y="40" width="235" height="170" as="geometry" />
         </mxCell>
 
         <mxCell id="svc-jira" value="🎫 Jira Service&#xa;• Comentários + Transições&#xa;• Campos obrigatórios&#xa;  (resolução, tipo, custo)&#xa;• Submissão de formulários&#xa;• API Token + Cloud ID" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="395" y="40" width="175" height="140" as="geometry" />
+          <mxGeometry x="515" y="40" width="235" height="170" as="geometry" />
         </mxCell>
 
         <mxCell id="svc-conta" value="👤 Conta Exclusão&#xa;• Verifica backup no Drive&#xa;• Deleta conta Workspace&#xa;• Admin resolvido por&#xa;  domínio (multi-domain)&#xa;• Operação irreversível" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="585" y="40" width="175" height="140" as="geometry" />
+          <mxGeometry x="765" y="40" width="235" height="170" as="geometry" />
         </mxCell>
 
-        <mxCell id="svc-chat" value="💬 Google Chat&#xa;• Início / Sucesso&#xa;• Vault reutilizado&#xa;• 5 alertas de falha:&#xa;  ⏱ Vault timeout&#xa;  📥 Download&#xa;  📤 Upload&#xa;  🗑 Exclusão conta&#xa;  🎫 Jira" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="775" y="40" width="175" height="140" as="geometry" />
+        <mxCell id="svc-chat" value="💬 Google Chat&#xa;• Início / Sucesso&#xa;• Vault reutilizado&#xa;• 5 alertas de falha:&#xa;  ⏱ Vault timeout&#xa;  📥 Download  📤 Upload&#xa;  🗑 Conta  🎫 Jira" style="rounded=1;fillColor=#f5f5f5;strokeColor=#666;fontSize=10;" vertex="1" parent="services-bg">
+          <mxGeometry x="1015" y="40" width="235" height="170" as="geometry" />
         </mxCell>
 
         <mxCell id="svc-auth" value="🔑 Google Auth&#xa;Service Account JSON&#xa;Domain-Wide Delegation&#xa;&#xa;Múltiplos domínios:&#xa;GOOGLE_DOMINIOS_ADMIN&#xa;domínio → admin e-mail" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#7a4400;fontStyle=1;fontSize=10;" vertex="1" parent="services-bg">
-          <mxGeometry x="965" y="40" width="180" height="140" as="geometry" />
+          <mxGeometry x="1285" y="40" width="240" height="170" as="geometry" />
         </mxCell>
 
-        <!-- ─── Processamento ──────────────────────────────────────── -->
+        <!-- ── Linha 3: Processamento | Armazenamento ── -->
         <mxCell id="proc-bg" value="Processamento Local" style="swimlane;startSize=25;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#7a4700;fontStyle=1;fontSize=12;rounded=1;" vertex="1" parent="server-bg">
-          <mxGeometry x="20" y="740" width="580" height="160" as="geometry" />
+          <mxGeometry x="20" y="820" width="750" height="195" as="geometry" />
         </mxCell>
 
-        <mxCell id="compress" value="🗜️ Compactação&#xa;• ZIP_DEFLATED&#xa;• Calcula SHA256 (blocos 8MB)&#xa;• Verifica espaço em disco" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="proc-bg">
-          <mxGeometry x="15" y="40" width="260" height="100" as="geometry" />
+        <mxCell id="compress" value="🗜️ Compactação&#xa;• ZIP_DEFLATED&#xa;• SHA256 em blocos de 8 MB&#xa;• Verifica espaço em disco" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="proc-bg">
+          <mxGeometry x="15" y="45" width="350" height="130" as="geometry" />
         </mxCell>
 
         <mxCell id="cleanup" value="🧹 Limpeza&#xa;• Remove temp/ após upload&#xa;• Logs: 30 dias ou 10 GB&#xa;• Trunca .log ativo (handler)" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="proc-bg">
-          <mxGeometry x="295" y="40" width="265" height="100" as="geometry" />
+          <mxGeometry x="385" y="45" width="350" height="130" as="geometry" />
         </mxCell>
 
-        <!-- ─── Armazenamento local ────────────────────────────────── -->
         <mxCell id="storage-bg" value="💾 Armazenamento Local" style="swimlane;startSize=25;fillColor=#fff8e1;strokeColor=#f57f17;fontColor=#e65100;fontStyle=1;fontSize=12;rounded=1;" vertex="1" parent="server-bg">
-          <mxGeometry x="620" y="740" width="560" height="160" as="geometry" />
+          <mxGeometry x="800" y="820" width="760" height="195" as="geometry" />
         </mxCell>
 
-        <mxCell id="temp" value="📁 temp/&#xa;Arquivos durante&#xa;o backup" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
-          <mxGeometry x="15" y="35" width="115" height="90" as="geometry" />
+        <mxCell id="temp" value="📁 temp/&#xa;Arquivos&#xa;durante backup" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
+          <mxGeometry x="15" y="38" width="165" height="120" as="geometry" />
         </mxCell>
 
-        <mxCell id="logs" value="📋 logs/&#xa;automacao_backups.log&#xa;30d / 10 GB" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
-          <mxGeometry x="145" y="35" width="115" height="90" as="geometry" />
+        <mxCell id="logs" value="📋 logs/&#xa;automacao_backups&#xa;.log — 30d / 10 GB" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
+          <mxGeometry x="195" y="38" width="165" height="120" as="geometry" />
         </mxCell>
 
-        <mxCell id="cred" value="🔐 credenciais/&#xa;service-account.json&#xa;ca-bundle.crt" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
-          <mxGeometry x="275" y="35" width="115" height="90" as="geometry" />
+        <mxCell id="cred" value="🔐 credenciais/&#xa;service-account&#xa;.json  ca-bundle.crt" style="shape=mxgraph.flowchart.stored_data;fillColor=#fff8e1;strokeColor=#f57f17;fontSize=10;" vertex="1" parent="storage-bg">
+          <mxGeometry x="375" y="38" width="165" height="120" as="geometry" />
         </mxCell>
 
         <mxCell id="sqlite" value="🗃️ SQLite&#xa;dados/backups.db&#xa;Histórico + estado&#xa;etapas (WAL mode)" style="shape=mxgraph.flowchart.stored_data;fillColor=#e1f0ff;strokeColor=#1565c0;fontColor=#0d47a1;fontStyle=1;fontSize=10;" vertex="1" parent="storage-bg">
-          <mxGeometry x="415" y="35" width="125" height="90" as="geometry" />
+          <mxGeometry x="555" y="38" width="185" height="120" as="geometry" />
         </mxCell>
 
-        <!-- ─── Systemd (processos supervisionados) ──────────────── -->
-        <mxCell id="systemd" value="🔁 systemd&#xa;• automacao-backups.service&#xa;  (Gunicorn Flask)&#xa;• automacao-celery.service&#xa;  (Celery Worker)&#xa;Restart automático" style="rounded=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontStyle=1;fontSize=10;" vertex="1" parent="server-bg">
-          <mxGeometry x="20" y="960" width="1160" height="110" as="geometry" />
+        <!-- ── Linha 4: systemd ── -->
+        <mxCell id="systemd" value="🔁 systemd  —  Supervisão de processos&#xa;• automacao-backups.service  (Gunicorn + Flask)          • automacao-celery.service  (Celery Worker)          Restart automático em caso de falha" style="rounded=1;fillColor=#e8f5e9;strokeColor=#2e7d32;fontColor=#1b5e20;fontStyle=1;fontSize=11;" vertex="1" parent="server-bg">
+          <mxGeometry x="20" y="1080" width="1540" height="80" as="geometry" />
         </mxCell>
 
         <!-- ═══════════════════════════════════════════════════════ -->
-        <!-- GOOGLE CLOUD APIs                                       -->
+        <!-- GOOGLE CLOUD APIs  (coluna direita)                    -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <mxCell id="google-bg" value="☁️  Google Cloud APIs" style="swimlane;startSize=30;fillColor=#fce4ec;strokeColor=#880e4f;fontColor=#880e4f;fontStyle=1;fontSize=13;rounded=1;" vertex="1" parent="1">
-          <mxGeometry x="1620" y="80" width="320" height="760" as="geometry" />
+          <mxGeometry x="2050" y="60" width="320" height="920" as="geometry" />
         </mxCell>
 
         <mxCell id="g-vault" value="🗄️ Google Vault API&#xa;Cria e monitora&#xa;exports de E-mail e Drive&#xa;Matter: Automacao-Backups" style="rounded=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=11;" vertex="1" parent="google-bg">
-          <mxGeometry x="25" y="55" width="270" height="100" as="geometry" />
+          <mxGeometry x="25" y="55" width="270" height="110" as="geometry" />
         </mxCell>
 
         <mxCell id="g-gcs" value="📦 Cloud Storage&#xa;Armazena arquivos&#xa;exportados pelo Vault&#xa;(buckets temporários)" style="rounded=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=11;" vertex="1" parent="google-bg">
-          <mxGeometry x="25" y="185" width="270" height="100" as="geometry" />
+          <mxGeometry x="25" y="200" width="270" height="110" as="geometry" />
         </mxCell>
 
         <mxCell id="g-drive" value="💾 Google Drive API&#xa;Drive Compartilhado&#xa;Backup ZIP + SHA256&#xa;(appProperties + description)" style="rounded=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=11;" vertex="1" parent="google-bg">
-          <mxGeometry x="25" y="315" width="270" height="100" as="geometry" />
+          <mxGeometry x="25" y="345" width="270" height="110" as="geometry" />
         </mxCell>
 
         <mxCell id="g-admin" value="👤 Admin SDK Directory v1&#xa;Exclusão da conta&#xa;Admin resolvido por domínio&#xa;(Domain-Wide Delegation)" style="rounded=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=11;" vertex="1" parent="google-bg">
-          <mxGeometry x="25" y="445" width="270" height="100" as="geometry" />
+          <mxGeometry x="25" y="490" width="270" height="110" as="geometry" />
         </mxCell>
 
         <mxCell id="g-chat" value="💬 Google Chat Webhook&#xa;Cards v2 — 5 tipos de alerta&#xa;Início, Sucesso, Conta&#xa;+ falhas específicas" style="rounded=1;fillColor=#fce4ec;strokeColor=#c62828;fontSize=11;" vertex="1" parent="google-bg">
-          <mxGeometry x="25" y="575" width="270" height="100" as="geometry" />
+          <mxGeometry x="25" y="635" width="270" height="110" as="geometry" />
         </mxCell>
 
         <!-- ═══════════════════════════════════════════════════════ -->
-        <!-- CONEXÕES                                                -->
+        <!-- CONEXÕES                                               -->
         <!-- ═══════════════════════════════════════════════════════ -->
 
         <!-- Jira Automation → Firewall -->
@@ -184,7 +237,7 @@
         </mxCell>
 
         <!-- Dashboard → SQLite (lê histórico) -->
-        <mxCell id="conn-dash-sqlite" value="Lê histórico (paginado)&#xa;?pagina=&amp;por_pagina=" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#1565c0;fontColor=#1565c0;fontSize=10;dashed=1;" edge="1" source="dashboard" target="sqlite" parent="1">
+        <mxCell id="conn-dash-sqlite" value="Lê histórico paginado&#xa;?pagina=&amp;por_pagina=" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#1565c0;fontColor=#1565c0;fontSize=10;dashed=1;" edge="1" source="dashboard" target="sqlite" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
@@ -193,7 +246,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Orchestrator → Services -->
+        <!-- Orchestrator → Serviços -->
         <mxCell id="conn-orc-vault" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666;" edge="1" source="orchestrator" target="svc-vault" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
@@ -213,13 +266,13 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Auth ← Credenciais -->
+        <!-- Credenciais → Auth -->
         <mxCell id="conn-cred-auth" value="Carrega JSON" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d79b00;fontColor=#7a4400;fontSize=10;dashed=1;" edge="1" source="cred" target="svc-auth" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Services → Google Cloud APIs -->
-        <mxCell id="conn-vault-gvault" value="Cria / monitora exports&#xa;(backoff exponencial)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#880e4f;fontColor=#880e4f;fontSize=10;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" edge="1" source="svc-vault" target="g-vault" parent="1">
+        <!-- Serviços → Google Cloud APIs -->
+        <mxCell id="conn-vault-gvault" value="Cria / monitora exports&#xa;(backoff exponencial)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#880e4f;fontColor=#880e4f;fontSize=10;" edge="1" source="svc-vault" target="g-vault" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
@@ -248,78 +301,24 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Vault → Temp -->
+        <!-- Vault Service → temp (salva arquivos) -->
         <mxCell id="conn-vault-temp" value="Salva arquivos" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#f57f17;fontColor=#e65100;fontSize=10;" edge="1" source="svc-vault" target="temp" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Drive → Temp (lê ZIP) -->
+        <!-- Drive → temp (lê ZIP) -->
         <mxCell id="conn-drive-temp" value="Lê ZIP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#f57f17;fontColor=#e65100;fontSize=10;" edge="1" source="svc-drive" target="temp" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <!-- Cleanup → Temp + Logs -->
+        <!-- Cleanup → temp -->
         <mxCell id="conn-clean-temp" value="Remove após upload" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#f57f17;fontColor=#e65100;fontSize=10;" edge="1" source="cleanup" target="temp" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
+
+        <!-- Cleanup → logs -->
         <mxCell id="conn-clean-logs" value="Trunca / Remove" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#f57f17;fontColor=#e65100;fontSize=10;" edge="1" source="cleanup" target="logs" parent="1">
           <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <!-- LEGENDA                                                 -->
-        <!-- ═══════════════════════════════════════════════════════ -->
-        <mxCell id="legend-bg" value="Legenda" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;rounded=1;" vertex="1" parent="1">
-          <mxGeometry x="30" y="540" width="310" height="280" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg1" value="" style="fillColor=#dae8fc;strokeColor=#6c8ebf;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="38" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg1-txt" value="Flask — Componentes HTTP" style="text;fontSize=11;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="38" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg2" value="" style="fillColor=#ffcccc;strokeColor=#cc0000;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="66" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg2-txt" value="Redis (broker Celery) — NOVO" style="text;fontSize=11;fontStyle=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="66" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg3" value="" style="fillColor=#fff2cc;strokeColor=#d6b656;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="94" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg3-txt" value="Worker Celery / Processamento" style="text;fontSize=11;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="94" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg4" value="" style="fillColor=#fce4ec;strokeColor=#c62828;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="122" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg4-txt" value="APIs Google Cloud (externas)" style="text;fontSize=11;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="122" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg5" value="" style="fillColor=#fff8e1;strokeColor=#f57f17;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="150" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg5-txt" value="Armazenamento local (disco)" style="text;fontSize=11;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="150" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg6" value="" style="fillColor=#e1f0ff;strokeColor=#1565c0;rounded=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="178" width="28" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg6-txt" value="SQLite (persistência) — NOVO" style="text;fontSize=11;fontStyle=1;" vertex="1" parent="legend-bg">
-          <mxGeometry x="52" y="178" width="240" height="18" as="geometry" />
-        </mxCell>
-
-        <mxCell id="leg7-txt" value="--- linha tracejada = leitura/auth" style="text;fontSize=10;fontColor=#999999;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="216" width="270" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="leg8-txt" value="─── linha sólida = escrita/chamada" style="text;fontSize=10;fontColor=#999999;" vertex="1" parent="legend-bg">
-          <mxGeometry x="15" y="240" width="270" height="18" as="geometry" />
         </mxCell>
 
       </root>
