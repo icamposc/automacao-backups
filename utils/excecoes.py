@@ -19,6 +19,10 @@ class ErroBackup(Exception):
 class ErroVaultTimeout(ErroBackup):
     """Export do Google Vault não completou dentro do tempo máximo."""
 
+    def __init__(self, mensagem: str, stats: dict = None):
+        super().__init__(mensagem)
+        self.stats = stats or {}
+
 
 class ErroVaultFalha(ErroBackup):
     """Export do Google Vault retornou status FAILED."""

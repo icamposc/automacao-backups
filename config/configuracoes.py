@@ -118,9 +118,10 @@ POLLING_INTERVALO_SEGUNDOS = int(
     _obter_variavel("POLLING_INTERVALO_SEGUNDOS", obrigatoria=False, padrao="60")
 )
 
-# Tempo máximo de espera para um export completar (segundos) — padrão 4 horas
+# Tempo máximo de espera para um export completar (segundos) — padrão 24 horas
+# Exports de Drive com muitos arquivos (15k+) podem levar mais de 6h
 TIMEOUT_MAXIMO_SEGUNDOS = int(
-    _obter_variavel("TIMEOUT_MAXIMO_SEGUNDOS", obrigatoria=False, padrao="14400")
+    _obter_variavel("TIMEOUT_MAXIMO_SEGUNDOS", obrigatoria=False, padrao="86400")
 )
 
 # Número máximo de exports simultâneos (limite do Google é 20, usamos 18 por segurança)

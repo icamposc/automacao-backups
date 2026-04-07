@@ -267,24 +267,50 @@ def notificar_vault_reaproveitado(
 
 
 def notificar_erro_vault_timeout(
-    email: str, ticket_id: str, export_id: str,
-    horas_decorridas: float, nome: str = None,
+    email: str,
+    ticket_id: str,
+    export_id: str,
+    horas_decorridas: float,
+    nome: str = None,
+    artefatos_exportados: int = 0,
+    artefatos_total: int = 0,
+    tamanho_mb: float = 0,
 ) -> bool:
     """Alerta: export do Vault não completou no tempo máximo."""
     identificador = nome or email
+
+    widgets = [
+        {"decoratedText": {"topLabel": "E-mail",          "text": email}},
+        {"decoratedText": {"topLabel": "Ticket",          "text": ticket_id}},
+        {"decoratedText": {"topLabel": "Export ID",       "text": export_id}},
+        {"decoratedText": {"topLabel": "Tempo decorrido", "text": f"{horas_decorridas:.1f}h"}},
+    ]
+
+    if artefatos_total > 0:
+        progresso_pct = artefatos_exportados / artefatos_total * 100
+        widgets.append({"decoratedText": {
+            "topLabel": "Progresso",
+            "text": (
+                f"{artefatos_exportados:,} / {artefatos_total:,} artefatos "
+                f"({progresso_pct:.1f}%)"
+            ),
+        }})
+
+    if tamanho_mb > 0:
+        widgets.append({"decoratedText": {
+            "topLabel": "Tamanho exportado",
+            "text": f"{tamanho_mb:.0f} MB",
+        }})
+
+    widgets.append({"decoratedText": {
+        "topLabel": "Ação Necessária",
+        "text": "Verificar o export manualmente no Google Vault e reprocessar o ticket",
+    }})
+
     return _enviar_card(
         titulo="⏱️ Timeout no Google Vault",
         subtitulo=f"Colaborador: {identificador}",
-        secoes=[{
-            "widgets": [
-                {"decoratedText": {"topLabel": "E-mail",           "text": email}},
-                {"decoratedText": {"topLabel": "Ticket",           "text": ticket_id}},
-                {"decoratedText": {"topLabel": "Export ID",        "text": export_id}},
-                {"decoratedText": {"topLabel": "Tempo decorrido",  "text": f"{horas_decorridas:.1f}h"}},
-                {"decoratedText": {"topLabel": "Ação Necessária",
-                                   "text": "Verificar o export manualmente no Google Vault e reprocessar o ticket"}},
-            ]
-        }],
+        secoes=[{"widgets": widgets}],
     )
 
 

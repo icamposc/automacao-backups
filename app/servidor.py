@@ -24,6 +24,7 @@ from flask import Flask, request, jsonify
 from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
 from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
+from dados.repositorio_backups import existe_backup_concluido_por_ticket
 from processamento.limpeza import limpar_logs_antigos
 from dados.banco import inicializar_banco, marcar_backups_interrompidos
 from utils.logger import obter_logger
@@ -76,10 +77,17 @@ def receber_webhook():
         nome      = dados.get("nome")
 
         if esta_em_processamento(email):
-            logger.warning(f"Webhook duplicado ignorado — backup já em andamento para: {email}")
+            logger.warning(f"Webhook ignorado — backup já em andamento: {email}")
             return jsonify({
                 "status": "ja_em_processamento",
                 "mensagem": f"Backup já está em andamento para {email}",
+            }), 200
+
+        if existe_backup_concluido_por_ticket(ticket_id):
+            logger.warning(f"Webhook ignorado — backup já concluído para ticket: {ticket_id}")
+            return jsonify({
+                "status": "ja_concluido",
+                "mensagem": f"Ticket {ticket_id} já possui backup concluído com sucesso",
             }), 200
 
         logger.info(f"Iniciando backup para: {email} (Ticket: {ticket_id})")

@@ -21,6 +21,9 @@ Histórico:
 ============================================================
 """
 
+import re
+from datetime import datetime
+
 from flask import Blueprint, jsonify, render_template, request
 
 from processamento.rastreador import (
@@ -29,6 +32,7 @@ from processamento.rastreador import (
     obter_resumo,
     obter_backup,
 )
+from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from utils.logger import obter_logger
 
 logger = obter_logger("dashboard")
@@ -93,3 +97,43 @@ def api_detalhe(email):
     if not backup:
         return jsonify({"erro": "Backup não encontrado"}), 404
     return jsonify(backup)
+
+
+@bp.route("/api/backups/iniciar", methods=["POST"])
+def api_iniciar_manual():
+    """
+    Dispara um backup manualmente sem depender do webhook do Jira.
+
+    Body JSON:
+        email     (obrigatório): e-mail corporativo do colaborador
+        nome      (opcional):    nome completo
+        ticket_id (opcional):    ticket Jira; se omitido, gera MANUAL-{timestamp}
+
+    Retorna 409 se já houver backup em andamento para o e-mail.
+    """
+    dados = request.get_json(silent=True) or {}
+
+    email = (dados.get("email") or "").strip().lower()
+    if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return jsonify({"erro": "E-mail inválido ou ausente"}), 400
+
+    nome      = (dados.get("nome") or "").strip() or None
+    ticket_id = (dados.get("ticket_id") or "").strip()
+    if not ticket_id:
+        ticket_id = f"MANUAL-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    if esta_em_processamento(email):
+        return jsonify({
+            "erro": f"Já existe um backup em andamento para {email}",
+            "status": "ja_em_processamento",
+        }), 409
+
+    iniciar_backup_async(email, ticket_id, nome)
+    logger.info(f"Backup manual iniciado — E-mail: {email}, Ticket: {ticket_id}, Nome: {nome}")
+
+    return jsonify({
+        "status": "iniciado",
+        "email":     email,
+        "ticket_id": ticket_id,
+        "nome":      nome,
+    }), 200

@@ -220,6 +220,9 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
                         export_drive_resultado = resultado
                         logger.info(f"Exportação de DRIVE concluída: {resultado.get('name')}")
                 except Exception as erro_export:
+                    # Re-raise direto para preservar atributos (ex: stats em ErroVaultTimeout)
+                    if isinstance(erro_export, (ErroVaultTimeout, ErroVaultFalha)):
+                        raise erro_export
                     msg = str(erro_export)
                     if "Timeout" in msg:
                         raise ErroVaultTimeout(msg)
@@ -320,8 +323,14 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
     except ErroVaultTimeout as erro:
         _tratar_erro(email, ticket_id, nome, str(erro))
         export_id = export_email_id if "E-mail" in str(erro) else export_drive_id
-        horas = float(str(erro).split("horas")[0].split()[-1]) if "horas" in str(erro) else 6.0
-        notificar_erro_vault_timeout(email, ticket_id, export_id or "?", horas, nome)
+        horas = float(str(erro).split("horas")[0].split()[-1]) if "horas" in str(erro) else 24.0
+        stats = getattr(erro, "stats", {})
+        notificar_erro_vault_timeout(
+            email, ticket_id, export_id or "?", horas, nome,
+            artefatos_exportados=int(stats.get("exportedArtifactCount") or 0),
+            artefatos_total=int(stats.get("totalArtifactCount") or 0),
+            tamanho_mb=int(stats.get("sizeInBytes") or 0) / (1024 * 1024),
+        )
 
     except ErroDownload as erro:
         _tratar_erro(email, ticket_id, nome, str(erro))

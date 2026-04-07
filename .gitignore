@@ -31,3 +31,5 @@ env/
 .DS_Store
 Thumbs.db
 dados/*.db
+dados/*.db-shm
+dados/*.db-wal

@@ -134,6 +134,21 @@ def existe_backup_em_andamento(email: str) -> bool:
     return _obter_id_ativo(email) is not None
 
 
+def existe_backup_concluido_por_ticket(ticket_id: str) -> bool:
+    """True se já existe backup concluído com sucesso para este ticket_id.
+
+    Impede reprocessamento causado por webhooks disparados pelo próprio
+    sistema ao atualizar/transicionar o ticket no Jira (ex: transicionar_resolvido
+    dispara novo webhook que chega após o backup já ter sido finalizado).
+    """
+    conn = obter_conexao()
+    row = conn.execute(
+        "SELECT id FROM backups WHERE ticket_id = ? AND status_geral = 'concluido' LIMIT 1",
+        (ticket_id,),
+    ).fetchone()
+    return row is not None
+
+
 def listar_ativos() -> list:
     """Retorna todos os backups em andamento com suas etapas."""
     conn = obter_conexao()

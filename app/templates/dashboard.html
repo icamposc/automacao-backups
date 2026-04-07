@@ -281,8 +281,108 @@
             color: var(--cor-texto-suave);
         }
 
+        /* Painel de disparo manual */
+        .painel-manual {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .painel-manual h2 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--cor-texto);
+        }
+
+        .form-manual {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1fr auto;
+            gap: 0.75rem;
+            align-items: end;
+        }
+
+        .campo-grupo {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .campo-grupo label {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .campo-grupo input {
+            background: var(--cor-fundo);
+            border: 1px solid var(--cor-borda);
+            border-radius: 8px;
+            padding: 0.6rem 0.875rem;
+            color: var(--cor-texto);
+            font-size: 0.875rem;
+            outline: none;
+            transition: border-color 0.15s;
+            width: 100%;
+        }
+
+        .campo-grupo input:focus {
+            border-color: var(--cor-primaria);
+        }
+
+        .campo-grupo input::placeholder {
+            color: var(--cor-pendente);
+        }
+
+        .btn-iniciar {
+            background: var(--cor-primaria);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.6rem 1.25rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, opacity 0.15s;
+            white-space: nowrap;
+            height: 38px;
+        }
+
+        .btn-iniciar:hover { background: #2563eb; }
+        .btn-iniciar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .feedback-manual {
+            margin-top: 0.875rem;
+            padding: 0.65rem 0.875rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            display: none;
+        }
+
+        .feedback-manual.sucesso {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: var(--cor-sucesso);
+        }
+
+        .feedback-manual.erro {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--cor-erro);
+        }
+
         /* Responsividade */
         @media (max-width: 768px) {
+            .form-manual {
+                grid-template-columns: 1fr;
+            }
+        }
             .cabecalho {
                 flex-direction: column;
                 gap: 0.5rem;
@@ -314,6 +414,32 @@
     </header>
 
     <main class="container">
+        <!-- Disparo Manual -->
+        <section class="painel-manual">
+            <h2>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Iniciar Backup Manual
+            </h2>
+            <div class="form-manual">
+                <div class="campo-grupo">
+                    <label for="inp-email">E-mail corporativo *</label>
+                    <input type="email" id="inp-email" placeholder="colaborador@empresa.com.br" autocomplete="off" />
+                </div>
+                <div class="campo-grupo">
+                    <label for="inp-nome">Nome completo</label>
+                    <input type="text" id="inp-nome" placeholder="Opcional" />
+                </div>
+                <div class="campo-grupo">
+                    <label for="inp-ticket">Ticket Jira</label>
+                    <input type="text" id="inp-ticket" placeholder="Ex: SPN-999 (opcional)" />
+                </div>
+                <button class="btn-iniciar" id="btn-iniciar" onclick="iniciarBackupManual()">
+                    Iniciar Backup
+                </button>
+            </div>
+            <div class="feedback-manual" id="feedback-manual"></div>
+        </section>
+
         <!-- Resumo -->
         <section class="resumo" id="resumo">
             <div class="card-resumo">
@@ -527,6 +653,82 @@
                 console.error('Erro ao atualizar dashboard:', erro);
             }
         }
+
+        /**
+         * Envia o formulário de backup manual para a API
+         */
+        async function iniciarBackupManual() {
+            const email     = document.getElementById('inp-email').value.trim();
+            const nome      = document.getElementById('inp-nome').value.trim();
+            const ticketId  = document.getElementById('inp-ticket').value.trim();
+            const btn       = document.getElementById('btn-iniciar');
+            const feedback  = document.getElementById('feedback-manual');
+
+            if (!email) {
+                mostrarFeedback('E-mail é obrigatório.', 'erro');
+                document.getElementById('inp-email').focus();
+                return;
+            }
+
+            // Confirmação antes de disparar
+            const confirmacao = confirm(
+                `Confirma o início do backup manual?\n\nE-mail: ${email}` +
+                (nome ? `\nNome: ${nome}` : '') +
+                (ticketId ? `\nTicket: ${ticketId}` : '\nTicket: gerado automaticamente')
+            );
+            if (!confirmacao) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Iniciando...';
+            feedback.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/backups/iniciar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        nome: nome || null,
+                        ticket_id: ticketId || null,
+                    }),
+                });
+
+                const dados = await resp.json();
+
+                if (resp.ok) {
+                    mostrarFeedback(
+                        `Backup iniciado com sucesso. Ticket: ${dados.ticket_id}`,
+                        'sucesso'
+                    );
+                    document.getElementById('inp-email').value = '';
+                    document.getElementById('inp-nome').value = '';
+                    document.getElementById('inp-ticket').value = '';
+                    atualizarDashboard();
+                } else {
+                    mostrarFeedback(dados.erro || 'Erro ao iniciar o backup.', 'erro');
+                }
+            } catch (e) {
+                mostrarFeedback('Falha de comunicação com o servidor.', 'erro');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Iniciar Backup';
+            }
+        }
+
+        function mostrarFeedback(mensagem, tipo) {
+            const el = document.getElementById('feedback-manual');
+            el.textContent = mensagem;
+            el.className = `feedback-manual ${tipo}`;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 8000);
+        }
+
+        // Enter no campo de e-mail também dispara
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('inp-email').addEventListener('keydown', e => {
+                if (e.key === 'Enter') iniciarBackupManual();
+            });
+        });
 
         // Atualização inicial e periódica
         atualizarDashboard();

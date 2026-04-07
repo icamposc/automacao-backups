@@ -22,7 +22,7 @@ Histórico:
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from googleapiclient.errors import HttpError
 
@@ -34,6 +34,7 @@ from config.configuracoes import (
     MAX_EXPORTS_SIMULTANEOS,
     PASTA_TEMP,
 )
+from utils.excecoes import ErroVaultTimeout
 from utils.retry import calcular_backoff
 from utils.logger import obter_logger
 
@@ -192,16 +193,36 @@ def criar_exportacao_drive(email: str) -> dict:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     nome_export = f"Drive_{email}_{timestamp}"
 
+    # versionDate: exporta apenas a versão mais recente de cada arquivo
+    # (última versão antes de 00:00 UTC do dia seguinte), evitando a explosão
+    # de artefatos causada pelo histórico de versões do Google Docs/Sheets/Slides.
+    amanha = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+    logger.info(f"Export de Drive com versionDate: {amanha} (versão atual de todos os arquivos)")
+
     # Corpo da requisição para criar a exportação
+    #
+    # IMPORTANTE — owner:{email}:
+    #   Filtra somente arquivos cujo PROPRIETÁRIO é o colaborador desligado.
+    #   Sem este filtro, searchMethod:ACCOUNT inclui todos os arquivos que o
+    #   usuário tem acesso (arquivos de outros compartilhados com ele),
+    #   podendo resultar em centenas de milhares de artefatos desnecessários.
+    #   Arquivos que pertencem a outros continuam existindo após a exclusão
+    #   da conta — não precisam ser incluídos neste backup.
+    #
+    # IMPORTANTE — includeSharedDrives / includeTeamDrives:
+    #   A API do Vault serializa booleanos false como ausentes na resposta,
+    #   mas o campo deve ser enviado explicitamente para garantir a exclusão.
     corpo_exportacao = {
         "name": nome_export,
         "query": {
             "corpus": "DRIVE",
             "dataScope": "ALL_DATA",
             "searchMethod": "ACCOUNT",
+            "terms": f"owner:{email}",
             "driveOptions": {
                 "includeSharedDrives": False,
                 "includeTeamDrives": False,
+                "versionDate": amanha,
             },
             "accountInfo": {
                 "emails": [email],
@@ -304,15 +325,18 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
 
     servico = obter_servico_vault()
     tempo_inicio = time.time()
+    ultima_exportacao = None
 
     try:
         while True:
             # Verifica se ultrapassou o timeout máximo
             tempo_decorrido = time.time() - tempo_inicio
             if tempo_decorrido > TIMEOUT_MAXIMO_SEGUNDOS:
-                raise Exception(
+                stats = ultima_exportacao.get("stats", {}) if ultima_exportacao else {}
+                raise ErroVaultTimeout(
                     f"Timeout: Export {export_id} não completou em "
-                    f"{TIMEOUT_MAXIMO_SEGUNDOS / 3600:.1f} horas"
+                    f"{TIMEOUT_MAXIMO_SEGUNDOS / 3600:.1f} horas",
+                    stats=stats,
                 )
 
             # Consulta o status atual da exportação
@@ -322,19 +346,38 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
                 .get(matterId=VAULT_MATTER_ID, exportId=export_id)
                 .execute()
             )
+            ultima_exportacao = exportacao
 
             status = exportacao.get("status")
             nome = exportacao.get("name", "")
             minutos = tempo_decorrido / 60
 
-            logger.info(
-                f"Export '{nome}' (ID: {export_id}) — "
-                f"Status: {status} — Tempo: {minutos:.1f} min"
-            )
+            # Extrai progresso de artefatos retornado pela API do Vault
+            stats = exportacao.get("stats", {})
+            artefatos_exportados = int(stats.get("exportedArtifactCount") or 0)
+            artefatos_total = int(stats.get("totalArtifactCount") or 0)
+            tamanho_mb = int(stats.get("sizeInBytes") or 0) / (1024 * 1024)
+
+            if artefatos_total > 0:
+                progresso_pct = artefatos_exportados / artefatos_total * 100
+                logger.info(
+                    f"Export '{nome}' (ID: {export_id}) — "
+                    f"Status: {status} — Tempo: {minutos:.1f} min — "
+                    f"Artefatos: {artefatos_exportados:,}/{artefatos_total:,} "
+                    f"({progresso_pct:.1f}%) — Tamanho: {tamanho_mb:.0f} MB"
+                )
+            else:
+                logger.info(
+                    f"Export '{nome}' (ID: {export_id}) — "
+                    f"Status: {status} — Tempo: {minutos:.1f} min"
+                )
 
             # Export concluído com sucesso
             if status == "COMPLETED":
-                logger.info(f"Export {export_id} COMPLETADO com sucesso em {minutos:.1f} min")
+                logger.info(
+                    f"Export {export_id} COMPLETADO em {minutos:.1f} min — "
+                    f"Total: {artefatos_total:,} artefatos, {tamanho_mb:.0f} MB"
+                )
                 return exportacao
 
             # Export falhou
