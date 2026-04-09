@@ -49,19 +49,19 @@ def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
     if not pasta_origem.exists():
         raise Exception(f"Pasta de origem não encontrada: {pasta_origem}")
 
-    # Lista todos os arquivos na pasta (recursivamente)
-    arquivos = list(pasta_origem.rglob("*"))
-    arquivos = [a for a in arquivos if a.is_file()]
+    # Lista todos os arquivos e acumula tamanho em passe único
+    arquivos = []
+    tamanho_total = 0
+    for entrada in pasta_origem.rglob("*"):
+        if entrada.is_file():
+            arquivos.append(entrada)
+            tamanho_total += entrada.stat().st_size
 
     if not arquivos:
         raise Exception(f"Pasta de origem está vazia: {pasta_origem}")
 
-    logger.info(f"Encontrados {len(arquivos)} arquivo(s) para compactar")
-
-    # Calcula o tamanho total dos arquivos originais
-    tamanho_total = sum(a.stat().st_size for a in arquivos)
     tamanho_total_mb = tamanho_total / (1024 * 1024)
-    logger.info(f"Tamanho total dos arquivos: {tamanho_total_mb:.1f} MB")
+    logger.info(f"Encontrados {len(arquivos)} arquivo(s) para compactar — {tamanho_total_mb:.1f} MB")
 
     # Verifica espaço em disco disponível
     espaco_livre = shutil.disk_usage(caminho_zip.parent).free
@@ -81,11 +81,12 @@ def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
 
     # Cria o arquivo ZIP com compressão
     with zipfile.ZipFile(caminho_zip, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for arquivo in arquivos:
-            # Nome relativo dentro do ZIP (preserva estrutura de pastas)
+        for i, arquivo in enumerate(arquivos, 1):
             nome_no_zip = arquivo.relative_to(pasta_origem)
-            logger.debug(f"Adicionando ao ZIP: {nome_no_zip}")
             zip_file.write(arquivo, nome_no_zip)
+            # Log resumido a cada 500 arquivos para evitar I/O excessivo
+            if i % 500 == 0 or i == len(arquivos):
+                logger.debug(f"Compactando... {i}/{len(arquivos)} arquivo(s)")
 
     # Confirma o tamanho do ZIP criado
     tamanho_zip = caminho_zip.stat().st_size

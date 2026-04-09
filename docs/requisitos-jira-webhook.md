@@ -251,7 +251,7 @@ GET /rest/api/3/issue/{ticket_id}?fields=description
 | Sensibilidade ao formato da Descrição | Baixa (formato padrão garantido) | Baixa (mesma regex) |
 | Configuração extra de permissão | Não | Sim (leitura no SPN) |
 
-> **Decisão necessária:** definir qual opção será adotada. A **Opção A** é recomendada por ser mais simples e não depender de chamadas adicionais.
+> **Decisão:** a **Opção A** foi adotada. O sistema extrai o e-mail diretamente da descrição via regex — sem chamadas adicionais à API do Jira.
 
 ---
 
@@ -312,14 +312,15 @@ POST /rest/api/3/issue/{issueIdOrKey}/transitions
 
 | Momento | Status destino | ID da transição |
 |---|---|---|
-| Backup iniciado (WebHook recebido) | **Em Análise** | Levantar antes da produção |
-| Backup concluído e conta excluída | **Resolvido** | Levantar antes da produção |
+| Backup iniciado (WebHook recebido) | **Em Análise** | `501` (configurado em `JIRA_TRANSICAO_EM_ANALISE`) |
+| Backup concluído e conta excluída | **Resolvido** | `381` (configurado em `JIRA_TRANSICAO_RESOLVIDO`) |
 
-**Como obter os IDs:**
+> Se o workflow do projeto SPN for alterado e os IDs mudarem, atualizar as variáveis `JIRA_TRANSICAO_EM_ANALISE` e `JIRA_TRANSICAO_RESOLVIDO` no `.env` do servidor.
+
+**Como verificar os IDs atuais:**
 ```
 GET /rest/api/3/issue/{qualquer_ticket_SPN}/transitions
 ```
-Retorna a lista de transições disponíveis com seus IDs. Configurar os valores nas variáveis de ambiente antes do primeiro deploy.
 
 ---
 

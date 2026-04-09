@@ -32,7 +32,6 @@ from config.configuracoes import (
     POLLING_INTERVALO_SEGUNDOS,
     TIMEOUT_MAXIMO_SEGUNDOS,
     MAX_EXPORTS_SIMULTANEOS,
-    PASTA_TEMP,
 )
 from utils.excecoes import ErroVaultTimeout
 from utils.retry import calcular_backoff
@@ -75,14 +74,20 @@ def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
 
     try:
         servico = obter_servico_vault()
-        resposta = (
-            servico.matters()
-            .exports()
-            .list(matterId=VAULT_MATTER_ID, pageSize=50)
-            .execute()
-        )
+        exports = []
+        page_token = None
 
-        exports = resposta.get("exports", [])
+        # Pagina todos os exports do Matter para não perder candidatos além da 1ª página
+        while True:
+            kwargs = {"matterId": VAULT_MATTER_ID, "pageSize": 100}
+            if page_token:
+                kwargs["pageToken"] = page_token
+            resposta = servico.matters().exports().list(**kwargs).execute()
+            exports.extend(resposta.get("exports", []))
+            page_token = resposta.get("nextPageToken")
+            if not page_token:
+                break
+
         candidatos = [
             e for e in exports
             if e.get("name", "").startswith(prefixo)
@@ -93,8 +98,15 @@ def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
             logger.info(f"Nenhum export existente aproveitável para {email} (tipo: {tipo})")
             return None
 
-        # Usa o mais recente (maior createTime)
-        mais_recente = max(candidatos, key=lambda e: e.get("createTime", ""))
+        # Usa o mais recente comparando como datetime (não como string)
+        def _parse_create_time(e: dict) -> datetime:
+            raw = e.get("createTime", "")
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        mais_recente = max(candidatos, key=_parse_create_time)
         logger.info(
             f"Export existente encontrado — "
             f"Nome: {mais_recente.get('name')}, "
@@ -301,6 +313,27 @@ def _criar_exportacao_com_retry(corpo: dict, email: str, tipo: str) -> dict:
             raise
 
 
+def liberar_semaforo_exportacao(exportacao: dict) -> None:
+    """
+    Libera o slot do semáforo de uma exportação que não será monitorada.
+
+    Deve ser chamado quando a criação de uma segunda exportação falha após a
+    primeira ter sido criada com sucesso — nesse caso, monitorar_exportacao
+    nunca é chamada para a primeira e o slot ficaria retido indefinidamente.
+
+    Não tem efeito se a exportação foi reaproveitada (buscar_exportacao_existente),
+    pois exports reaproveitados não adquirem o semáforo.
+
+    Args:
+        exportacao: Dicionário retornado por criar_exportacao_email ou
+                    criar_exportacao_drive
+    """
+    if exportacao.get("_reaproveitado", False):
+        return  # Export reaproveitado não adquiriu semáforo — nada a liberar
+    _semaforo_exports.release()
+    logger.debug(f"Semáforo liberado manualmente para export {exportacao.get('id')}")
+
+
 def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dict:
     """
     Monitora o status de uma exportação no Vault até que ela seja
@@ -384,12 +417,17 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
             if status == "FAILED":
                 raise Exception(f"Export {export_id} FALHOU. Detalhes: {exportacao}")
 
-            # Ainda em andamento — aguarda antes de verificar novamente
+            # Backoff adaptativo: aumenta o intervalo conforme o tempo passa,
+            # pois exports longos (Drive com muitos arquivos) demoram horas.
+            # Caps em 10× o intervalo base para não ficar polling demais nem de menos.
+            fator = min(10, 1 + int(tempo_decorrido / 3600))  # +1 fator por hora decorrida
+            intervalo = POLLING_INTERVALO_SEGUNDOS * fator
             logger.debug(
                 f"Export {export_id} em andamento. "
-                f"Próxima verificação em {POLLING_INTERVALO_SEGUNDOS}s..."
+                f"Próxima verificação em {intervalo}s "
+                f"(fator adaptativo: {fator}×)..."
             )
-            time.sleep(POLLING_INTERVALO_SEGUNDOS)
+            time.sleep(intervalo)
 
     finally:
         # Libera o semáforo apenas se ele foi adquirido por este processo.

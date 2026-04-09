@@ -27,6 +27,7 @@ from servicos.vault_exportacao import (
     criar_exportacao_drive,
     monitorar_exportacao,
     baixar_exportacao,
+    liberar_semaforo_exportacao,
 )
 from servicos.drive_upload import fazer_upload
 from servicos.conta_exclusao import verificar_e_deletar_conta
@@ -40,7 +41,7 @@ from servicos.jira_atualizacao import (
     transicionar_resolvido,
     submeter_formularios_pendentes,
 )
-from config.configuracoes import JIRA_TRANSICAO_EM_ANALISE, JIRA_TRANSICAO_RESOLVIDO, PASTA_TEMP
+from config.configuracoes import JIRA_TRANSICAO_EM_ANALISE, JIRA_TRANSICAO_RESOLVIDO, PASTA_VAULT
 from processamento.compactacao import compactar_arquivos, calcular_sha256
 from processamento.limpeza import limpar_arquivos_temporarios, limpar_arquivo_zip
 from processamento.rastreador import (
@@ -133,15 +134,22 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
     logger.info(f"Ticket: {ticket_id}")
     logger.info(f"{'=' * 60}")
 
-    registrar_backup(email, ticket_id, nome)
+    try:
+        registrar_backup(email, ticket_id, nome)
+    except ValueError as erro:
+        # Race condition: dois webhooks chegaram ao mesmo tempo para o mesmo e-mail.
+        # O índice único do banco rejeitou a inserção duplicada — encerra sem ação.
+        logger.warning(f"Task descartada — {erro}")
+        return
+
     chat_notificar_inicio(email, ticket_id, nome)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    pasta_colaborador = PASTA_TEMP / f"{email}_{timestamp}"
+    pasta_colaborador = PASTA_VAULT / f"{email}_{timestamp}"
     pasta_colaborador.mkdir(parents=True, exist_ok=True)
 
     nome_zip = f"{email}.zip"
-    caminho_zip = PASTA_TEMP / nome_zip
+    caminho_zip = PASTA_VAULT / nome_zip
     link_drive = None
     sha256_zip = None
 
@@ -175,7 +183,15 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
                 export_email_id=export_email_id, nome=nome,
             )
 
-        export_drive = criar_exportacao_drive(email)
+        try:
+            export_drive = criar_exportacao_drive(email)
+        except Exception:
+            # Export de e-mail foi criado com sucesso, mas o de Drive falhou.
+            # monitorar_exportacao nunca será chamada para o e-mail, portanto o
+            # slot do semáforo ficaria retido permanentemente — liberamos aqui.
+            liberar_semaforo_exportacao(export_email)
+            raise
+
         export_drive_id = export_drive.get("id")
         drive_reaproveitado = export_drive.get("_reaproveitado", False)
 

@@ -50,7 +50,8 @@ if [ "$1" = "--dev" ]; then
     echo ""
     celery -A worker.celery_app worker \
         --loglevel=info \
-        --concurrency=1 \
+        --pool=threads \
+        --concurrency=10 \
         --queues=celery \
         --hostname="worker@%h"
 else
@@ -58,13 +59,15 @@ else
     mkdir -p logs
 
     echo "Modo: PRODUÇÃO"
-    echo "  → Concurrency: 1 (respeita limite de exports do Google Vault)"
+    echo "  → Pool: threads (compartilha semáforo do Vault entre backups paralelos)"
+    echo "  → Concurrency: 10 (10 backups simultâneos; 10×2=20 exports, semáforo em 18)"
     echo "  → Logs: logs/celery_worker.log"
     echo ""
 
     celery -A worker.celery_app worker \
         --loglevel=info \
-        --concurrency=1 \
+        --pool=threads \
+        --concurrency=10 \
         --queues=celery \
         --hostname="worker@%h" \
         --logfile="logs/celery_worker.log" \

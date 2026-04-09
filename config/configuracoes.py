@@ -53,12 +53,20 @@ def _obter_variavel(nome: str, obrigatoria: bool = True, padrao: str = None) -> 
 # Caminhos do projeto
 # ============================================================
 RAIZ_PROJETO = _RAIZ_PROJETO
-PASTA_LOGS = _RAIZ_PROJETO / "logs"
-PASTA_TEMP = _RAIZ_PROJETO / "temp"
+
+# Permite sobrescrever via env para apontar para volumes externos (ex: HDD no Docker)
+_pasta_logs_env = os.getenv("PASTA_LOGS", "")
+_pasta_temp_env = os.getenv("PASTA_TEMP", "")
+_pasta_vault_env = os.getenv("PASTA_VAULT", "")
+
+PASTA_LOGS = Path(_pasta_logs_env) if _pasta_logs_env else Path("/mnt/hdd/logs")
+PASTA_TEMP = Path(_pasta_temp_env) if _pasta_temp_env else _RAIZ_PROJETO / "temp"
+PASTA_VAULT = Path(_pasta_vault_env) if _pasta_vault_env else Path("/mnt/hdd/vault")
 
 # Cria as pastas se não existirem
-PASTA_LOGS.mkdir(exist_ok=True)
-PASTA_TEMP.mkdir(exist_ok=True)
+PASTA_LOGS.mkdir(parents=True, exist_ok=True)
+PASTA_TEMP.mkdir(parents=True, exist_ok=True)
+PASTA_VAULT.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
 # Google — Service Account e delegação de domínio

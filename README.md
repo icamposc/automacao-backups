@@ -38,7 +38,7 @@ ACCESS-XXXXXX (PAI — Desligamento)
 
 ### Princípio de Funcionamento
 
-O servidor recebe o webhook e retorna **HTTP 200 imediatamente** — sem bloquear o Jira. Todo o processamento acontece em uma **thread de background**, permitindo que backups de múltiplos colaboradores rodem em paralelo.
+O servidor recebe o webhook e retorna **HTTP 200 imediatamente** — sem bloquear o Jira. A tarefa é enfileirada no **Redis** e processada por um **worker Celery em background**, garantindo que o backup não seja perdido mesmo que o servidor seja reiniciado após o enfileiramento.
 
 ---
 
@@ -53,7 +53,7 @@ POST /webhook/backup-desligado
         ├─ Valida assinatura HMAC (opcional)
         ├─ Extrai e-mail da descrição (regex)
         ├─ Verifica duplicatas
-        └─ HTTP 200 ──► Thread de background
+        └─ HTTP 200 ──► Worker Celery (background)
                                 │
                                 ▼
                     ┌─────────────────────────┐
@@ -115,7 +115,7 @@ POST /webhook/backup-desligado
 
 | Decisão | Justificativa |
 |---|---|
-| Processamento assíncrono | Webhook retorna HTTP 200 imediatamente; backup roda em thread para não bloquear o Jira |
+| Processamento assíncrono | Webhook retorna HTTP 200 imediatamente; tarefa enfileirada no Redis e processada pelo worker Celery para não bloquear o Jira |
 | Semáforo de concorrência | Máximo de 18 exports simultâneos (limite Google Vault: 20) |
 | Monitoramento em paralelo | Exports de e-mail e Drive monitorados via `ThreadPoolExecutor` |
 | Reaproveitamento de exports | Se exports já existem no Vault (COMPLETED ou IN_PROGRESS), são reutilizados — evita duplicatas em caso de retry |
@@ -128,6 +128,7 @@ POST /webhook/backup-desligado
 ## Pré-requisitos
 
 - **Python** 3.10 ou superior
+- **Redis** (broker e backend do Celery) — `redis-server`
 - **Google Workspace** com:
   - Google Vault (Matter pré-configurado)
   - Google Drive Compartilhado (Shared Drive) — pasta de destino criada
@@ -215,9 +216,15 @@ Edite o arquivo `.env` com os valores do seu ambiente:
 
 | Variável | Descrição | Padrão |
 |---|---|---|
-| `POLLING_INTERVALO_SEGUNDOS` | Intervalo entre verificações de status do export | `180` (3 min) |
-| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo máximo de espera por export | `21600` (6 h) |
+| `POLLING_INTERVALO_SEGUNDOS` | Intervalo entre verificações de status do export | `60` (1 min) |
+| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo máximo de espera por export | `86400` (24 h) |
 | `MAX_EXPORTS_SIMULTANEOS` | Exports simultâneos no Vault (limite Google: 20) | `18` |
+
+### Redis e Worker Celery
+
+| Variável | Descrição | Padrão |
+|---|---|---|
+| `REDIS_URL` | URL de conexão com o Redis (broker e backend do Celery) | `redis://localhost:6379/0` |
 
 ### SSL Corporativo (Netskope / Proxy)
 
@@ -235,27 +242,114 @@ REQUESTS_CA_BUNDLE=/caminho/para/ca-bundle.crt
 
 ---
 
-## Como Executar
+## Docker (recomendado para produção)
 
-### Desenvolvimento
+O projeto inclui `Dockerfile` e `docker-compose.yml` prontos. Uma única imagem é usada para o servidor e o worker — apenas o comando muda.
+
+### Pré-requisitos
+
+- Docker e Docker Compose instalados no servidor
+- Arquivo `.env` preenchido (copie de `.env.example`)
+- `config/credenciais/service-account.json` presente
+
+### Subir o ambiente completo
 
 ```bash
-source venv/bin/activate
-python -m app.servidor
+docker compose up -d
 ```
 
-### Produção (Gunicorn)
+Isso inicia três containers: `redis`, `servidor` e `worker`.
+
+### Comandos úteis
+
+```bash
+# Acompanhar logs em tempo real
+docker compose logs -f
+
+# Ver apenas os logs do worker (onde o backup roda)
+docker compose logs -f worker
+
+# Parar tudo
+docker compose down
+
+# Reconstruir a imagem após atualizar o código
+docker compose build && docker compose up -d
+
+# Verificar saúde dos containers
+docker compose ps
+```
+
+### Volumes criados automaticamente
+
+| Volume | Conteúdo |
+|---|---|
+| `storage_data` | Banco de dados SQLite (`backups.db`) |
+| `logs_data` | Arquivos de log do servidor e do worker |
+| `temp_data` | Arquivos temporários durante o processamento |
+| `redis_data` | Dados do Redis (fila de tarefas) |
+
+> As credenciais (`config/credenciais/`) são montadas como volume somente leitura — nunca são copiadas para dentro da imagem.
+
+### Observações sobre o .env com Docker
+
+O `docker-compose.yml` sobrescreve automaticamente duas variáveis — **não é necessário alterá-las no `.env`**:
+
+| Variável | Valor no Docker |
+|---|---|
+| `REDIS_URL` | `redis://redis:6379/0` (rede interna do Compose) |
+| `SQLITE_PATH` | `/app/storage/backups.db` (volume dedicado) |
+
+---
+
+## Como Executar
+
+O sistema é composto por dois processos que devem rodar em paralelo: o **servidor Flask** (recebe webhooks) e o **worker Celery** (processa os backups). O Redis deve estar rodando antes de iniciar qualquer um dos dois.
+
+### Usando os scripts prontos (recomendado)
+
+```bash
+# Terminal 1 — Servidor
+./scripts/iniciar_servidor.sh           # Produção (Gunicorn)
+./scripts/iniciar_servidor.sh --dev     # Desenvolvimento (Flask com reload)
+
+# Terminal 2 — Worker Celery
+./scripts/iniciar_worker.sh             # Produção (background, log em arquivo)
+./scripts/iniciar_worker.sh --dev       # Desenvolvimento (log no terminal)
+```
+
+### Manualmente
 
 ```bash
 source venv/bin/activate
+
+# 1. Redis (se não estiver rodando)
+redis-server &
+
+# 2. Servidor Flask (desenvolvimento)
+python -m app.servidor
+
+# 3. Worker Celery (em outro terminal)
+celery -A worker.celery_app worker --loglevel=info --concurrency=1
+```
+
+### Produção (Gunicorn + Celery)
+
+```bash
+source venv/bin/activate
+
+# Servidor
 gunicorn -w 2 -b 0.0.0.0:5000 --timeout 120 app.servidor:app
+
+# Worker (em outro terminal ou como serviço)
+celery -A worker.celery_app worker --loglevel=info --concurrency=1 \
+    --logfile=logs/celery_worker.log --detach
 ```
 
 ### Verificar se está rodando
 
 ```bash
 curl http://localhost:5000/saude
-# {"status": "ok", "servico": "automacao-backups", "versao": "1.0.0"}
+# {"status": "ok", "servico": "automacao-backups", "versao": "2.0.0"}
 ```
 
 ---
@@ -468,7 +562,11 @@ automacao-backups/
 │   ├── servidor.py                 #   Servidor Flask e rotas HTTP
 │   ├── webhook_handler.py          #   Validação, extração e autenticação do webhook
 │   ├── dashboard.py                #   Rotas e renderização do dashboard web
-│   └── __init__.py
+│   └── templates/                  #   Templates HTML do dashboard
+│
+├── worker/                         # Processamento assíncrono (Celery + Redis)
+│   ├── celery_app.py               #   Configuração da instância Celery
+│   └── tarefas.py                  #   Task Celery que executa o fluxo de backup
 │
 ├── processamento/                  # Orquestração do fluxo
 │   ├── orquestrador.py             #   Coordena as 8 etapas do backup
@@ -486,9 +584,15 @@ automacao-backups/
 │   ├── google_chat.py              #   Notificações e alertas via webhook do Chat
 │   └── __init__.py
 │
+├── dados/                          # Persistência (SQLite)
+│   ├── banco.py                    #   Inicialização do banco e marcação de backups interrompidos
+│   └── repositorio_backups.py      #   CRUD da tabela de backups e etapas
+│
 ├── utils/                          # Utilitários transversais
 │   ├── logger.py                   #   Logging centralizado (console + arquivo rotativo)
 │   ├── validacoes.py               #   Validação de payload e extração de e-mail/nome via regex
+│   ├── excecoes.py                 #   Exceções personalizadas por etapa do backup
+│   ├── retry.py                    #   Cálculo de backoff exponencial para retentativas
 │   └── __init__.py
 │
 ├── config/                         # Configuração
@@ -496,16 +600,25 @@ automacao-backups/
 │   ├── credenciais/                #   Service Account JSON + CA bundle (gitignore)
 │   └── __init__.py
 │
+├── scripts/                        # Scripts de inicialização
+│   ├── iniciar_servidor.sh         #   Inicia o servidor (Gunicorn ou Flask --dev)
+│   └── iniciar_worker.sh           #   Inicia o worker Celery (produção ou --dev)
+│
 ├── testes/                         # Testes
-│   ├── teste_webhook.py            #   Testes unitários do webhook e extração de dados
-│   ├── teste_vault.py              #   Testes de integração com Google Vault
-│   ├── teste_drive.py              #   Testes de integração com Google Drive
-│   ├── teste_google_chat.py        #   Testes de notificação no Google Chat
+│   ├── conftest.py                 #   Fixtures compartilhadas do pytest
+│   ├── test_webhook_handler.py     #   Testes do handler de webhook
+│   ├── test_orquestrador.py        #   Testes do orquestrador
+│   ├── test_compactacao.py         #   Testes de compactação ZIP
+│   ├── test_vault_exportacao.py    #   Testes de integração com Google Vault
+│   ├── test_drive_upload.py        #   Testes de upload para Google Drive
+│   ├── test_google_chat.py         #   Testes de notificação no Google Chat
+│   ├── test_rastreador.py          #   Testes do rastreador de estado
 │   └── simular_webhook.py          #   Simulador para testes manuais
 │
 ├── docs/                           # Documentação técnica
 │   ├── requisitos-jira-webhook.md  #   Requisitos da integração com Jira
-│   └── webhook-e-mensagens-jira.md #   Payload e mensagens por etapa
+│   ├── webhook-e-mensagens-jira.md #   Payload e mensagens por etapa
+│   └── arquitetura-onpremise.md    #   Diagrama e descrição da arquitetura on-premise
 │
 ├── logs/                           # Logs com rotação automática (gitignore)
 ├── temp/                           # Arquivos temporários do processamento (gitignore)
@@ -522,6 +635,8 @@ automacao-backups/
 |---|---|---|
 | [Flask](https://flask.palletsprojects.com/) | 3.1.0 | Servidor web para receber webhooks |
 | [Gunicorn](https://gunicorn.org/) | 23.0.0 | Servidor WSGI para produção |
+| [Celery](https://docs.celeryq.dev/) | 5.4.0 | Processamento assíncrono de backups |
+| [Redis](https://redis.io/) | — | Broker e backend do Celery |
 | [google-api-python-client](https://github.com/googleapis/google-api-python-client) | 2.159.0 | APIs do Google (Vault, Drive, Admin SDK) |
 | [google-auth](https://github.com/googleapis/google-auth-library-python) | 2.37.0 | Autenticação com Service Account |
 | [google-auth-httplib2](https://github.com/googleapis/google-auth-library-python-httplib2) | 0.3.0 | Transporte HTTP com suporte a CA bundle customizado |

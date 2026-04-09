@@ -11,15 +11,17 @@ Descrição: Define as tarefas assíncronas executadas pelo
 """
 
 from worker.celery_app import app
+from processamento.orquestrador import executar_backup_direto, registrar_celery_task_id
 from utils.logger import obter_logger
 
 logger = obter_logger("tarefas")
 
-
 @app.task(
     name="tarefas.executar_backup",
     bind=True,
-    max_retries=0,  # Sem retry automático — o orquestrador já tem lógica de retry interna
+    max_retries=0,  # Sem retry automático — orquestrador já tem retry interno por etapa
+    # time_limit não é usado: --pool=threads não suporta SIGALRM. O timeout de
+    # exportação (TIMEOUT_MAXIMO_SEGUNDOS) é controlado no nível da aplicação.
 )
 def executar_backup(self, email: str, ticket_id: str, nome: str = None) -> None:
     """
@@ -36,9 +38,6 @@ def executar_backup(self, email: str, ticket_id: str, nome: str = None) -> None:
         f"Tarefa Celery iniciada — "
         f"Task ID: {self.request.id}, E-mail: {email}, Ticket: {ticket_id}"
     )
-
-    # Importação tardia para evitar importações circulares no carregamento do módulo
-    from processamento.orquestrador import executar_backup_direto, registrar_celery_task_id
 
     # Associa o ID da task Celery ao backup no banco
     registrar_celery_task_id(email, self.request.id)

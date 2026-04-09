@@ -30,7 +30,9 @@ def obter_conexao() -> sqlite3.Connection:
     if not hasattr(_local, "conn") or _local.conn is None:
         from config.configuracoes import SQLITE_PATH
         SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(SQLITE_PATH), check_same_thread=False)
+        # check_same_thread omitido (padrão True) — cada thread tem sua própria
+        # conexão via threading.local(), portanto nunca há compartilhamento
+        conn = sqlite3.connect(str(SQLITE_PATH))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -78,9 +80,18 @@ def inicializar_banco() -> None:
             FOREIGN KEY (backup_id) REFERENCES backups(id) ON DELETE CASCADE
         );
 
-        CREATE INDEX IF NOT EXISTS idx_backups_email  ON backups(email);
-        CREATE INDEX IF NOT EXISTS idx_backups_status ON backups(status_geral);
-        CREATE INDEX IF NOT EXISTS idx_etapas_backup  ON etapas_backup(backup_id);
+        CREATE INDEX IF NOT EXISTS idx_backups_email        ON backups(email);
+        CREATE INDEX IF NOT EXISTS idx_backups_status       ON backups(status_geral);
+        CREATE INDEX IF NOT EXISTS idx_backups_ticket       ON backups(ticket_id);
+        CREATE INDEX IF NOT EXISTS idx_backups_celery       ON backups(celery_task_id);
+        CREATE INDEX IF NOT EXISTS idx_backups_email_status ON backups(email, status_geral);
+        CREATE INDEX IF NOT EXISTS idx_etapas_backup        ON etapas_backup(backup_id);
+
+        -- Índice único parcial: impede dois backups ativos para o mesmo e-mail.
+        -- Se dois webhooks chegarem simultaneamente (race condition), o segundo
+        -- INSERT falha com IntegrityError e é rejeitado antes de qualquer dano.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_backups_email_ativo
+            ON backups(email) WHERE status_geral = 'em_andamento';
     """)
 
     conn.commit()
@@ -114,7 +125,7 @@ def marcar_backups_interrompidos() -> int:
     cursor = conn.execute(
         """UPDATE backups
            SET status_geral  = 'erro',
-               fim           = datetime('now', 'localtime'),
+               fim           = datetime('now'),
                erro_mensagem = 'Backup interrompido por reinício do servidor'
            WHERE status_geral = 'em_andamento'"""
     )

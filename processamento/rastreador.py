@@ -41,7 +41,13 @@ STATUS_ERRO        = "erro"
 
 
 def registrar_backup(email: str, ticket_id: str, nome: str = None) -> None:
-    """Registra um novo backup no banco de dados."""
+    """
+    Registra um novo backup no banco de dados.
+
+    Raises:
+        ValueError: se já houver backup ativo para este e-mail (race condition).
+                    O orquestrador deve capturar e encerrar a task silenciosamente.
+    """
     from dados.repositorio_backups import inserir_backup
     inserir_backup(email, ticket_id, nome)
     logger.info(f"Backup registrado: {email} (Ticket: {ticket_id})")

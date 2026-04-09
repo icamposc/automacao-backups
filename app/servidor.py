@@ -17,6 +17,7 @@ Histórico:
 ============================================================
 """
 
+import threading
 from datetime import datetime
 
 from flask import Flask, request, jsonify
@@ -34,13 +35,19 @@ logger = obter_logger("servidor")
 # Cria a aplicação Flask
 app = Flask(__name__)
 
+# Limite de tamanho do payload (protege contra requisições maliciosas gigantes)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+
 # Registra o Blueprint do Dashboard
 app.register_blueprint(dashboard_bp)
 
 # ── Inicialização na carga do módulo ───────────────────────────────────────
+# banco e marcação de interrompidos são rápidos e síncronos (necessários antes da 1ª requisição)
 inicializar_banco()
 marcar_backups_interrompidos()
-limpar_logs_antigos()
+
+# limpeza de logs pode demorar — executa em background para não atrasar o startup
+threading.Thread(target=limpar_logs_antigos, daemon=True).start()
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])
@@ -195,4 +202,4 @@ def raiz():
 if __name__ == "__main__":
     from config.configuracoes import SERVIDOR_HOST, SERVIDOR_PORTA
     logger.info(f"Iniciando servidor em {SERVIDOR_HOST}:{SERVIDOR_PORTA}")
-    app.run(host=SERVIDOR_HOST, port=SERVIDOR_PORTA, debug=True)
+    app.run(host=SERVIDOR_HOST, port=SERVIDOR_PORTA, debug=False)

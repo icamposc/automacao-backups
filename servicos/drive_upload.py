@@ -78,18 +78,20 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
         metadados["appProperties"] = {"sha256": sha256}
         logger.info(f"SHA256 será salvo como metadado no Drive: {sha256[:16]}...")
 
+    # Cria a sessão autenticada uma única vez — reutilizada em todas as tentativas
+    # para evitar overhead de autenticação a cada retry.
+    # Usa AuthorizedSession (requests) em vez de httplib2: o Netskope remove o
+    # header 'Location' nas respostas de redirect, e o requests lida melhor com isso.
+    ca_bundle = os.getenv("REQUESTS_CA_BUNDLE")
+    credenciais = _obter_credenciais()
+    sessao = AuthorizedSession(credenciais)
+    if ca_bundle:
+        sessao.verify = ca_bundle
+
+    dados = {}
+
     for tentativa in range(1, MAX_TENTATIVAS + 1):
         try:
-            # Usa AuthorizedSession (requests) em vez de httplib2 para o upload.
-            # O httplib2 falha com o Netskope porque o proxy remove o header
-            # 'Location' das respostas de redirect no upload resumível.
-            # O requests lida melhor com proxies corporativos neste cenário.
-            ca_bundle = os.getenv("REQUESTS_CA_BUNDLE")
-            credenciais = _obter_credenciais()
-            sessao = AuthorizedSession(credenciais)
-            if ca_bundle:
-                sessao.verify = ca_bundle
-
             # Etapa 1: Inicia a sessão de upload resumível
             headers_inicio = {
                 "X-Upload-Content-Type": "application/zip",

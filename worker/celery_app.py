@@ -2,16 +2,23 @@
 ============================================================
 Configuração do Celery — Automação de Backups
 ============================================================
-Versão: 1.0.0
-Data: 2026-04-02
+Versão: 1.1.0
+Data: 2026-04-08
 Descrição: Instância e configuração do Celery com Redis
-           como broker e backend. Usa um único worker
-           (concurrency=1) para respeitar o limite de
-           exports simultâneos do Google Vault.
+           como broker e backend. Usa pool=threads com
+           concurrency=4 para backups simultâneos com
+           semáforo compartilhado no mesmo processo.
+============================================================
+Histórico:
+  1.1.0 (2026-04-08) — Fecha conexão SQLite após cada task
+                        via sinal task_postrun (correção de
+                        acúmulo em threading.local)
+  1.0.0 (2026-04-02) — Versão inicial
 ============================================================
 """
 
 from celery import Celery
+from celery.signals import task_postrun
 
 # A importação de configuracoes é feita aqui para que o
 # worker também carregue o .env ao iniciar
@@ -36,16 +43,30 @@ app.conf.update(
     # Confirma a tarefa APÓS execução — garante que não se perca em caso de crash
     task_acks_late=True,
 
-    # Um backup por vez por worker — respeita o semáforo de exports do Vault
+    # Cada thread recebe apenas 1 tarefa por vez — evita acúmulo indevido
     worker_prefetch_multiplier=1,
 
-    # Limite total de 5 horas por tarefa (exports grandes podem demorar)
-    task_time_limit=18000,
-
-    # Alerta soft 10 minutos antes do hard limit
-    task_soft_time_limit=17400,
+    # Timeout de tarefa não é configurado globalmente aqui pois --pool=threads
+    # não suporta time_limit baseado em sinal (SIGALRM). O timeout de exportação
+    # é controlado em nível de aplicação via TIMEOUT_MAXIMO_SEGUNDOS no Vault.
 
     # Timezone
     timezone="America/Sao_Paulo",
     enable_utc=True,
 )
+
+
+@task_postrun.connect
+def fechar_conexao_banco(**kwargs) -> None:
+    """
+    Fecha a conexão SQLite da thread atual após cada task Celery.
+
+    Com --pool=threads, as threads são reutilizadas entre tasks. Sem este
+    handler, a conexão permaneceria aberta indefinidamente na thread,
+    acumulando transações e impedindo o checkpoint do WAL mode.
+
+    O sinal task_postrun é disparado mesmo quando a task falha, garantindo
+    o fechamento em todos os cenários.
+    """
+    from dados.banco import fechar_conexao_thread
+    fechar_conexao_thread()

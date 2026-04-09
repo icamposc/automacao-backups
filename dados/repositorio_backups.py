@@ -11,7 +11,8 @@ Descrição: Camada de acesso a dados para a tabela 'backups'
 ============================================================
 """
 
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timezone
 from typing import Optional
 
 from dados.banco import obter_conexao
@@ -39,13 +40,24 @@ _ETAPAS_PADRAO = [
 def inserir_backup(email: str, ticket_id: str, nome: str = None) -> int:
     """
     Insere um novo backup e suas 8 etapas. Retorna o ID gerado.
+
+    Raises:
+        ValueError: se já existir um backup em andamento para este e-mail
+                    (violação do índice único parcial — race condition detectada).
     """
     conn = obter_conexao()
-    cursor = conn.execute(
-        """INSERT INTO backups (email, ticket_id, nome, status_geral, inicio)
-           VALUES (?, ?, ?, 'em_andamento', ?)""",
-        (email, ticket_id, nome or email, datetime.now().isoformat()),
-    )
+    try:
+        cursor = conn.execute(
+            """INSERT INTO backups (email, ticket_id, nome, status_geral, inicio)
+               VALUES (?, ?, ?, 'em_andamento', ?)""",
+            (email, ticket_id, nome or email, datetime.now(timezone.utc).isoformat()),
+        )
+    except sqlite3.IntegrityError:
+        # Índice único parcial detectou tentativa duplicada (race condition entre webhooks)
+        raise ValueError(
+            f"Backup já em andamento para {email} — webhook duplicado ignorado"
+        )
+
     backup_id = cursor.lastrowid
 
     conn.executemany(
@@ -65,7 +77,7 @@ def atualizar_etapa(email: str, numero_etapa: int, status: str) -> None:
         logger.warning(f"Backup ativo não encontrado ao atualizar etapa: {email}")
         return
 
-    agora = datetime.now().isoformat()
+    agora = datetime.now(timezone.utc).isoformat()
     conn = obter_conexao()
 
     if status == "em_andamento":
@@ -101,7 +113,7 @@ def finalizar_backup(
            WHERE id = ?""",
         (
             "concluido" if sucesso else "erro",
-            datetime.now().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             erro_mensagem,
             link_drive,
             sha256_zip,
@@ -158,7 +170,10 @@ def listar_ativos() -> list:
            FROM backups WHERE status_geral = 'em_andamento'
            ORDER BY inicio DESC"""
     ).fetchall()
-    return [_montar_dict(row) for row in rows]
+    if not rows:
+        return []
+    etapas = _carregar_etapas_em_lote([r["id"] for r in rows])
+    return [_montar_dict(row, etapas.get(row["id"], [])) for row in rows]
 
 
 def listar_historico(pagina: int = 1, por_pagina: int = 50) -> list:
@@ -178,7 +193,10 @@ def listar_historico(pagina: int = 1, por_pagina: int = 50) -> list:
            ORDER BY inicio DESC LIMIT ? OFFSET ?""",
         (por_pagina, offset),
     ).fetchall()
-    return [_montar_dict(row) for row in rows]
+    if not rows:
+        return []
+    etapas = _carregar_etapas_em_lote([r["id"] for r in rows])
+    return [_montar_dict(row, etapas.get(row["id"], [])) for row in rows]
 
 
 def obter_por_email(email: str) -> Optional[dict]:
@@ -191,7 +209,10 @@ def obter_por_email(email: str) -> Optional[dict]:
            ORDER BY inicio DESC LIMIT 1""",
         (email,),
     ).fetchone()
-    return _montar_dict(row) if row else None
+    if not row:
+        return None
+    etapas = _carregar_etapas_em_lote([row["id"]])
+    return _montar_dict(row, etapas.get(row["id"], []))
 
 
 def obter_resumo() -> dict:
@@ -229,18 +250,30 @@ def _obter_id_ativo(email: str) -> Optional[int]:
     return row[0] if row else None
 
 
-def _carregar_etapas(backup_id: int) -> list:
+def _carregar_etapas_em_lote(backup_ids: list) -> dict:
+    """
+    Carrega etapas de múltiplos backups em uma única query.
+    Retorna {backup_id: [etapas]} — elimina o problema de N+1 queries.
+    """
+    if not backup_ids:
+        return {}
+    placeholders = ",".join("?" * len(backup_ids))
     conn = obter_conexao()
     rows = conn.execute(
-        """SELECT numero, nome, descricao, status, inicio, fim
-           FROM etapas_backup WHERE backup_id = ? ORDER BY numero""",
-        (backup_id,),
+        f"""SELECT backup_id, numero, nome, descricao, status, inicio, fim
+            FROM etapas_backup
+            WHERE backup_id IN ({placeholders})
+            ORDER BY backup_id, numero""",
+        backup_ids,
     ).fetchall()
-    return [dict(r) for r in rows]
+    resultado: dict = {}
+    for r in rows:
+        bid = r["backup_id"]
+        resultado.setdefault(bid, []).append(dict(r))
+    return resultado
 
 
-def _montar_dict(row) -> dict:
-    etapas = _carregar_etapas(row["id"])
+def _montar_dict(row, etapas: list) -> dict:
     return {
         "email":         row["email"],
         "ticket_id":     row["ticket_id"],
