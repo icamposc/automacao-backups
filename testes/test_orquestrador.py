@@ -68,5 +68,5 @@ class TestIniciarBackupAsync:
         iniciar_backup_async("user@empresa.com", "SPN-1", "João")
 
         mock_tarefas.executar_backup.delay.assert_called_once_with(
-            "user@empresa.com", "SPN-1", "João"
+            "user@empresa.com", "SPN-1", "João", True
         )

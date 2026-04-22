@@ -37,6 +37,7 @@ def obter_conexao() -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA wal_autocheckpoint=1000")
         _local.conn = conn
     return _local.conn
 
@@ -65,18 +66,20 @@ def inicializar_banco() -> None:
             link_drive      TEXT,
             sha256_zip      TEXT,
             erro_mensagem   TEXT,
-            celery_task_id  TEXT
+            celery_task_id  TEXT,
+            deletar_conta   INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS etapas_backup (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            backup_id   INTEGER NOT NULL,
-            numero      INTEGER NOT NULL,
-            nome        TEXT    NOT NULL,
-            descricao   TEXT,
-            status      TEXT    NOT NULL DEFAULT 'pendente',
-            inicio      TEXT,
-            fim         TEXT,
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            backup_id     INTEGER NOT NULL,
+            numero        INTEGER NOT NULL,
+            nome          TEXT    NOT NULL,
+            descricao     TEXT,
+            status        TEXT    NOT NULL DEFAULT 'pendente',
+            inicio        TEXT,
+            fim           TEXT,
+            progresso_pct INTEGER,
             FOREIGN KEY (backup_id) REFERENCES backups(id) ON DELETE CASCADE
         );
 
@@ -84,8 +87,9 @@ def inicializar_banco() -> None:
         CREATE INDEX IF NOT EXISTS idx_backups_status       ON backups(status_geral);
         CREATE INDEX IF NOT EXISTS idx_backups_ticket       ON backups(ticket_id);
         CREATE INDEX IF NOT EXISTS idx_backups_celery       ON backups(celery_task_id);
-        CREATE INDEX IF NOT EXISTS idx_backups_email_status ON backups(email, status_geral);
-        CREATE INDEX IF NOT EXISTS idx_etapas_backup        ON etapas_backup(backup_id);
+        CREATE INDEX IF NOT EXISTS idx_backups_email_status  ON backups(email, status_geral);
+        CREATE INDEX IF NOT EXISTS idx_backups_ticket_status ON backups(ticket_id, status_geral);
+        CREATE INDEX IF NOT EXISTS idx_etapas_backup         ON etapas_backup(backup_id);
 
         -- Índice único parcial: impede dois backups ativos para o mesmo e-mail.
         -- Se dois webhooks chegarem simultaneamente (race condition), o segundo
@@ -95,6 +99,22 @@ def inicializar_banco() -> None:
     """)
 
     conn.commit()
+
+    # Migrações: adiciona colunas em instalações existentes
+    migracoes = [
+        ("ALTER TABLE etapas_backup ADD COLUMN progresso_pct INTEGER",
+         "coluna 'progresso_pct' adicionada à tabela etapas_backup"),
+        ("ALTER TABLE backups ADD COLUMN deletar_conta INTEGER NOT NULL DEFAULT 1",
+         "coluna 'deletar_conta' adicionada à tabela backups"),
+    ]
+    for sql, descricao in migracoes:
+        try:
+            conn.execute(sql)
+            conn.commit()
+            logger.info(f"Migração aplicada: {descricao}")
+        except sqlite3.OperationalError:
+            pass  # Coluna já existe
+
     conn.close()
     logger.info(f"Banco de dados inicializado: {SQLITE_PATH}")
 

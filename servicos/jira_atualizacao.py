@@ -86,17 +86,23 @@ def _adicionar_comentario(ticket_id: str, mensagem: str) -> bool:
         return False
 
 
-def comentar_inicio(ticket_id: str, email: str) -> bool:
+def comentar_inicio(ticket_id: str, email: str, deletar_conta: bool = True) -> bool:
     """
     Adiciona comentário informando que o backup foi iniciado.
 
     Args:
-        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
-        email: E-mail do colaborador sendo processado
+        ticket_id:     Chave do ticket no Jira (ex: "SPN-123")
+        email:         E-mail do colaborador sendo processado
+        deletar_conta: Se False, inclui aviso de que a conta NÃO será excluída
 
     Returns:
         True se o comentário foi adicionado com sucesso
     """
+    aviso_conta = (
+        "\n⚠️ Atenção: a exclusão automática da conta está DESATIVADA para este backup. "
+        "A conta será mantida no Google Workspace ao final do processo."
+        if not deletar_conta else ""
+    )
     mensagem = (
         f"[Automação] Backup iniciado para: {email}\n\n"
         f"Etapas em andamento:\n"
@@ -104,6 +110,7 @@ def comentar_inicio(ticket_id: str, email: str) -> bool:
         f"2. Criando exportação do Drive no Google Vault\n\n"
         f"O processo pode levar algumas horas dependendo do volume de dados. "
         f"Atualizações serão postadas automaticamente neste ticket."
+        f"{aviso_conta}"
     )
     return _adicionar_comentario(ticket_id, mensagem)
 
@@ -123,27 +130,34 @@ def comentar_progresso(ticket_id: str, etapa: str) -> bool:
     return _adicionar_comentario(ticket_id, mensagem)
 
 
-def comentar_sucesso(ticket_id: str, email: str, link_drive: str) -> bool:
+def comentar_sucesso(ticket_id: str, email: str, link_drive: str, deletar_conta: bool = True) -> bool:
     """
     Adiciona comentário informando que o backup foi concluído com sucesso.
 
     Inclui o link para o arquivo no Google Drive Compartilhado.
 
     Args:
-        ticket_id: Chave do ticket no Jira
-        email: E-mail do colaborador processado
-        link_drive: Link do arquivo .zip no Google Drive
+        ticket_id:     Chave do ticket no Jira
+        email:         E-mail do colaborador processado
+        link_drive:    Link do arquivo .zip no Google Drive
+        deletar_conta: Se False, registra que a conta foi mantida no Workspace
 
     Returns:
         True se o comentário foi adicionado com sucesso
     """
+    status_conta = (
+        "⚠️ Conta mantida no Google Workspace (exclusão desativada para este backup)."
+        if not deletar_conta
+        else "A conta será excluída na próxima etapa."
+    )
     mensagem = (
         f"[Automação] Backup CONCLUÍDO com sucesso para: {email}\n\n"
         f"O arquivo de backup foi enviado para o Google Drive Compartilhado.\n"
         f"Link: {link_drive}\n\n"
         f"Conteúdo do backup:\n"
         f"- E-mails (formato PST)\n"
-        f"- Arquivos do Google Drive"
+        f"- Arquivos do Google Drive\n\n"
+        f"{status_conta}"
     )
     return _adicionar_comentario(ticket_id, mensagem)
 
@@ -231,20 +245,100 @@ _CAMPOS_TRANSICAO_RESOLVIDO = {
     "customfield_11129": {"id": "24423"},    # Equipe Resolvedora: Automação
 }
 
+# Ordem dos status no fluxo de trabalho do projeto SPN.
+# Usado para evitar regressão (ex: não voltar para "Em análise" se já está em "Escalado").
+_ORDEM_FLUXO = ["Aguardando Suporte", "Em análise", "Escalado", "Resolvido", "Fechado"]
 
-def transicionar_resolvido(ticket_id: str, id_transicao: str) -> bool:
+
+def obter_status_atual(ticket_id: str) -> str | None:
+    """
+    Retorna o nome do status atual do ticket.
+
+    Args:
+        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
+
+    Returns:
+        Nome do status atual, ou None se houve erro
+    """
+    url = f"{JIRA_URL_BASE}/rest/api/3/issue/{ticket_id}?fields=status"
+    try:
+        resposta = requests.get(url, headers=_HEADERS, auth=_AUTH, timeout=_TIMEOUT)
+        resposta.raise_for_status()
+        return resposta.json()["fields"]["status"]["name"]
+    except requests.exceptions.RequestException as erro:
+        logger.error(f"Erro ao obter status do ticket {ticket_id}: {erro}")
+        return None
+
+
+def transicionar_para_status(ticket_id: str, status_destino: str, campos: dict = None) -> bool:
+    """
+    Transiciona o ticket para o status destino buscando o ID de transição dinamicamente.
+
+    Verifica o status atual antes de transicionar:
+    - Se já está no status destino, ignora.
+    - Se está em um status mais avançado no fluxo, ignora (evita regressão).
+    - Busca o ID da transição disponível para o status destino e executa.
+
+    Fluxo esperado: Aguardando Suporte → Em análise → Escalado → Resolvido
+
+    Args:
+        ticket_id:      Chave do ticket no Jira (ex: "SPN-123")
+        status_destino: Nome exato do status destino (ex: "Em análise", "Resolvido")
+        campos:         Campos obrigatórios pela tela de transição (opcional)
+
+    Returns:
+        True se a transição foi executada (ou não era necessária), False se houve erro
+    """
+    status_atual = obter_status_atual(ticket_id)
+    if not status_atual:
+        return False
+
+    if status_atual == status_destino:
+        logger.info(f"Ticket {ticket_id} já está em '{status_destino}' — transição ignorada")
+        return True
+
+    try:
+        pos_atual = _ORDEM_FLUXO.index(status_atual)
+        pos_destino = _ORDEM_FLUXO.index(status_destino)
+        if pos_atual > pos_destino:
+            logger.info(
+                f"Ticket {ticket_id} está em '{status_atual}' (mais avançado que '{status_destino}') "
+                f"— transição ignorada para evitar regressão no fluxo"
+            )
+            return True
+    except ValueError:
+        pass  # Status fora do fluxo conhecido — tenta transicionar normalmente
+
+    transicoes = obter_transicoes_disponiveis(ticket_id)
+    transicao = next((t for t in transicoes if t["to"]["name"] == status_destino), None)
+
+    if not transicao:
+        logger.error(
+            f"Transição para '{status_destino}' não disponível no ticket {ticket_id} "
+            f"(status atual: '{status_atual}')"
+        )
+        return False
+
+    return transicionar_ticket(ticket_id, transicao["id"], campos=campos)
+
+
+def transicionar_resolvido(ticket_id: str, id_transicao: str = None) -> bool:
     """
     Transiciona o ticket para "Resolvido" preenchendo os campos obrigatórios
     da tela de transição do projeto SPN.
 
+    Utiliza busca dinâmica de transição — funciona independente do status atual,
+    incluindo quando o ticket está em "Escalado" por intervenção manual.
+    O parâmetro id_transicao é mantido apenas por compatibilidade e é ignorado.
+
     Args:
-        ticket_id: Chave do ticket no Jira (ex: "SPN-123")
-        id_transicao: ID da transição "Resolvido"
+        ticket_id:    Chave do ticket no Jira (ex: "SPN-123")
+        id_transicao: Ignorado (mantido por compatibilidade)
 
     Returns:
         True se a transição foi executada com sucesso
     """
-    return transicionar_ticket(ticket_id, id_transicao, campos=_CAMPOS_TRANSICAO_RESOLVIDO)
+    return transicionar_para_status(ticket_id, "Resolvido", campos=_CAMPOS_TRANSICAO_RESOLVIDO)
 
 
 def submeter_formularios_pendentes(ticket_id: str) -> bool:

@@ -34,7 +34,7 @@ logger = obter_logger("drive_upload")
 MAX_TENTATIVAS = 3
 
 
-def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = None) -> dict:
+def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = None, on_progresso: callable = None) -> dict:
     """
     Faz upload de um arquivo para o Google Drive Compartilhado.
 
@@ -47,7 +47,11 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
 
     Args:
         caminho_arquivo: Caminho local do arquivo a ser enviado
-        nome_arquivo: Nome do arquivo no Drive (opcional, usa o nome original se não fornecido)
+        nome_arquivo:    Nome do arquivo no Drive (opcional, usa o nome original se não fornecido)
+        sha256:          Hash SHA256 para salvar como metadado no Drive (opcional)
+        on_progresso:    Callback opcional chamado a cada chunk enviado com o percentual
+                         de conclusão (0–100). Nunca lança exceção — erros são silenciados
+                         para não interromper o upload.
 
     Returns:
         Dicionário com dados do arquivo criado no Drive, incluindo:
@@ -80,8 +84,7 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
 
     # Cria a sessão autenticada uma única vez — reutilizada em todas as tentativas
     # para evitar overhead de autenticação a cada retry.
-    # Usa AuthorizedSession (requests) em vez de httplib2: o Netskope remove o
-    # header 'Location' nas respostas de redirect, e o requests lida melhor com isso.
+    # Usa AuthorizedSession (requests): o Netskope remove o header 'Location' em redirects.
     ca_bundle = os.getenv("REQUESTS_CA_BUNDLE")
     credenciais = _obter_credenciais()
     sessao = AuthorizedSession(credenciais)
@@ -136,7 +139,16 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
                         enviado += len(chunk)
                         progresso = int((enviado / tamanho_total) * 100)
                         logger.info(f"Progresso do upload: {progresso}%")
+                        if on_progresso:
+                            try:
+                                on_progresso(progresso)
+                            except Exception:
+                                pass  # progresso é informativo — nunca deve interromper o upload
                     else:
+                        logger.error(
+                            f"Resposta inesperada do Drive ({resp_chunk.status_code}): "
+                            f"{resp_chunk.text[:500]}"
+                        )
                         resp_chunk.raise_for_status()
 
             arquivo_id = dados.get("id")

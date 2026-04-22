@@ -117,8 +117,10 @@ def api_iniciar_manual():
     if not email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
         return jsonify({"erro": "E-mail inválido ou ausente"}), 400
 
-    nome      = (dados.get("nome") or "").strip() or None
-    ticket_id = (dados.get("ticket_id") or "").strip()
+    nome          = (dados.get("nome") or "").strip() or None
+    ticket_id     = (dados.get("ticket_id") or "").strip()
+    deletar_conta = bool(dados.get("deletar_conta", True))
+
     if not ticket_id:
         ticket_id = f"MANUAL-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -128,12 +130,16 @@ def api_iniciar_manual():
             "status": "ja_em_processamento",
         }), 409
 
-    iniciar_backup_async(email, ticket_id, nome)
-    logger.info(f"Backup manual iniciado — E-mail: {email}, Ticket: {ticket_id}, Nome: {nome}")
+    iniciar_backup_async(email, ticket_id, nome, deletar_conta=deletar_conta)
+    logger.info(
+        f"Backup manual iniciado — E-mail: {email}, Ticket: {ticket_id}, "
+        f"Nome: {nome}, Deletar conta: {deletar_conta}"
+    )
 
     return jsonify({
-        "status": "iniciado",
-        "email":     email,
-        "ticket_id": ticket_id,
-        "nome":      nome,
+        "status":        "iniciado",
+        "email":         email,
+        "ticket_id":     ticket_id,
+        "nome":          nome,
+        "deletar_conta": deletar_conta,
     }), 200

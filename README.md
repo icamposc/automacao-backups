@@ -464,10 +464,26 @@ Recebe o webhook do Jira e inicia o backup em background.
 
 ### `GET /saude`
 
-Health check para monitoramento (PRTG, Zabbix, etc.).
+Health check simples para monitoramento (PRTG, Zabbix, etc.).
 
 ```json
-{"status": "ok", "servico": "automacao-backups", "versao": "1.0.0"}
+{"status": "ok", "servico": "automacao-backups", "versao": "2.0.0"}
+```
+
+### `GET /health`
+
+Health check detalhado com status de cada componente.
+
+```json
+{
+  "status": "ok",
+  "versao": "2.0.0",
+  "timestamp": "2026-04-13T09:00:00.000000",
+  "backups_em_andamento": 1,
+  "componentes": {"servidor": "ok", "banco": "ok", "celery": "ok"},
+  "resumo": {"ativos": 1, "sucessos": 10, "erros": 2, "total_finalizados": 12},
+  "ultima_execucao": {"email": "...", "fim": "...", "status": "concluido"}
+}
 ```
 
 ---
@@ -480,15 +496,52 @@ Dashboard web com acompanhamento em tempo real dos backups em andamento e histó
 
 ### `GET /api/backups/ativos`
 
-Retorna os backups atualmente em processamento (JSON).
+Retorna os backups em andamento com todas as etapas e progresso (JSON).
 
-### `GET /api/backups/historico`
+### `GET /api/backups/historico?pagina=1&por_pagina=50`
 
-Retorna o histórico de backups executados nesta sessão (JSON).
+Retorna o histórico de backups finalizados com paginação (JSON).
+
+| Param | Tipo | Padrão | Máximo |
+|---|---|---|---|
+| `pagina` | int | 1 | — |
+| `por_pagina` | int | 50 | 200 |
 
 ### `GET /api/backups/resumo`
 
 Retorna contadores gerais: total, concluídos, em andamento, com erro (JSON).
+
+### `GET /api/backups/<email>`
+
+Retorna o backup mais recente (ativo ou finalizado) para o e-mail informado.
+
+### `POST /api/backups/iniciar`
+
+Inicia um backup manualmente sem depender do webhook do Jira.
+
+**Body JSON:**
+
+```json
+{
+  "email": "colaborador@empresa.com.br",
+  "nome": "Nome Completo",
+  "ticket_id": "SPN-999"
+}
+```
+
+| Campo | Obrigatório | Descrição |
+|---|---|---|
+| `email` | Sim | E-mail corporativo do colaborador |
+| `nome` | Não | Nome completo (para notificações e logs) |
+| `ticket_id` | Não | Chave do ticket Jira; se omitida, gera `MANUAL-{timestamp}` |
+
+**Respostas:**
+
+| Código | Descrição |
+|---|---|
+| `200` | Backup enfileirado com sucesso |
+| `400` | E-mail inválido ou ausente |
+| `409` | Já existe um backup em andamento para este e-mail |
 
 ---
 
@@ -514,9 +567,12 @@ Para configurar, crie um webhook no Google Chat e adicione a URL em `GOOGLE_CHAT
 
 Acesse `http://[servidor]:5000/dashboard` para visualizar:
 
-- Backups em andamento (etapa atual, colaborador, ticket)
-- Histórico da sessão com status e link do backup no Drive
-- Contadores: total, concluídos, em andamento, com erro
+- **Backups em andamento** — colaborador, ticket, etapa atual e progresso visual das 8 etapas
+- **Progresso em tempo real** — barra e percentual de Download (etapa 4) e Upload (etapa 6), atualizados a cada chunk/arquivo processado
+- **Histórico** — backups finalizados com status, link do Drive e SHA-256 do ZIP
+- **Contadores** — em andamento, concluídos, com erro e total
+- **Disparo manual** — formulário para iniciar um backup sem depender do webhook do Jira
+- **Auto-refresh** — dados atualizados automaticamente a cada 10 segundos
 
 ---
 
@@ -572,7 +628,7 @@ automacao-backups/
 │   ├── orquestrador.py             #   Coordena as 8 etapas do backup
 │   ├── compactacao.py              #   Compactação ZIP com verificação de espaço
 │   ├── limpeza.py                  #   Remoção de temporários e ZIPs
-│   ├── rastreador.py               #   Estado em memória para o dashboard
+│   ├── rastreador.py               #   Interface pública de rastreamento (delega para repositorio_backups)
 │   └── __init__.py
 │
 ├── servicos/                       # Integrações com APIs externas
@@ -584,9 +640,9 @@ automacao-backups/
 │   ├── google_chat.py              #   Notificações e alertas via webhook do Chat
 │   └── __init__.py
 │
-├── dados/                          # Persistência (SQLite)
-│   ├── banco.py                    #   Inicialização do banco e marcação de backups interrompidos
-│   └── repositorio_backups.py      #   CRUD da tabela de backups e etapas
+├── dados/                          # Persistência (SQLite + WAL mode)
+│   ├── banco.py                    #   Inicialização, migrações e marcação de backups interrompidos no restart
+│   └── repositorio_backups.py      #   CRUD das tabelas backups e etapas_backup (inclui progresso_pct)
 │
 ├── utils/                          # Utilitários transversais
 │   ├── logger.py                   #   Logging centralizado (console + arquivo rotativo)

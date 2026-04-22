@@ -21,6 +21,7 @@ Histórico:
 
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -44,10 +45,15 @@ logger = obter_logger("vault_exportacao")
 _semaforo_exports = threading.Semaphore(MAX_EXPORTS_SIMULTANEOS)
 
 # Número máximo de tentativas para operações que podem falhar
-MAX_TENTATIVAS = 3
+MAX_TENTATIVAS = 10
+
+# Cache TTL para buscar_exportacao_existente: evita paginar todos os exports
+# do Vault a cada chamada durante o fluxo de criação (múltiplas chamadas por backup).
+_CACHE_TTL_SEGUNDOS = 300  # 5 minutos
+_cache_exports: dict = {}  # f"{email}:{tipo}" → (timestamp, resultado)
 
 
-def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
+def buscar_exportacao_existente(email: str, tipo: str, usar_cache: bool = True) -> dict | None:
     """
     Verifica se já existe uma exportação válida (IN_PROGRESS ou COMPLETED)
     no Vault para o e-mail e tipo informados.
@@ -60,13 +66,23 @@ def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
     - "Drive_{email}_" para exportações de Drive
 
     Args:
-        email: E-mail do colaborador
-        tipo: "E-MAIL" ou "DRIVE"
+        email:       E-mail do colaborador
+        tipo:        "E-MAIL" ou "DRIVE"
+        usar_cache:  Se True (padrão), usa cache TTL de 5 min para evitar
+                     paginação repetida da API. Passe False para forçar consulta
+                     fresca (ex: verificação pós-falha de criação).
 
     Returns:
         Dicionário com os dados da exportação mais recente válida,
         ou None se não houver nenhuma aproveitável.
     """
+    chave_cache = f"{email}:{tipo}"
+    if usar_cache:
+        entrada = _cache_exports.get(chave_cache)
+        if entrada and (time.time() - entrada[0]) < _CACHE_TTL_SEGUNDOS:
+            logger.debug(f"Cache hit: exports existentes para {email} ({tipo})")
+            return entrada[1]
+
     prefixo = f"Email_{email}_" if tipo == "E-MAIL" else f"Drive_{email}_"
     status_validos = {"IN_PROGRESS", "COMPLETED"}
 
@@ -96,6 +112,7 @@ def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
 
         if not candidatos:
             logger.info(f"Nenhum export existente aproveitável para {email} (tipo: {tipo})")
+            _cache_exports[chave_cache] = (time.time(), None)
             return None
 
         # Usa o mais recente comparando como datetime (não como string)
@@ -115,6 +132,7 @@ def buscar_exportacao_existente(email: str, tipo: str) -> dict | None:
         )
         # Marca como reaproveitado para o orquestrador não liberar o semáforo
         mais_recente["_reaproveitado"] = True
+        _cache_exports[chave_cache] = (time.time(), mais_recente)
         return mais_recente
 
     except Exception as erro:
@@ -302,6 +320,20 @@ def _criar_exportacao_com_retry(corpo: dict, email: str, tipo: str) -> dict:
                 logger.info(f"Aguardando {espera}s antes de tentar novamente (backoff exponencial)...")
                 time.sleep(espera)
             else:
+                # Última tentativa falhou — o Vault pode ter criado o export apesar do erro
+                # (ex: timeout na resposta após criação bem-sucedida no servidor).
+                # Verifica se o export existe antes de desistir.
+                logger.warning(
+                    f"Todas as tentativas falharam para {tipo} de {email}. "
+                    f"Verificando se o export foi criado no Vault apesar do erro..."
+                )
+                exportacao_existente = buscar_exportacao_existente(email, tipo, usar_cache=False)
+                if exportacao_existente:
+                    logger.info(
+                        f"Export {tipo} encontrado no Vault após falha de criação — "
+                        f"reaproveitando: {exportacao_existente.get('id')}"
+                    )
+                    return exportacao_existente
                 raise Exception(
                     f"Falha ao criar exportação {tipo} para {email} "
                     f"após {MAX_TENTATIVAS} tentativas: {erro}"
@@ -437,17 +469,25 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
             logger.debug(f"Semáforo liberado para export {export_id}")
 
 
-def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:
+def baixar_exportacao(
+    exportacao: dict,
+    pasta_destino: Path,
+    on_progresso: callable = None,
+) -> list[Path]:
     """
     Baixa os arquivos de uma exportação concluída do Cloud Storage.
 
     O Google Vault armazena os arquivos exportados em buckets do
     Cloud Storage. Esta função encontra os arquivos e os baixa
-    para a pasta de destino local.
+    para a pasta de destino local em chunks, reportando progresso
+    por bytes (não por arquivo) para atualização granular da interface.
 
     Args:
-        exportacao: Dicionário com dados da exportação (retornado por monitorar_exportacao)
+        exportacao:    Dicionário com dados da exportação (retornado por monitorar_exportacao)
         pasta_destino: Pasta local onde os arquivos serão salvos
+        on_progresso:  Callback opcional chamado a cada chunk baixado com o
+                       percentual de conclusão em bytes (0–100). Nunca
+                       lança exceção — erros são silenciados para não interromper o download.
 
     Returns:
         Lista de caminhos (Path) dos arquivos baixados
@@ -455,12 +495,12 @@ def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:
     Raises:
         Exception: Se falhar ao baixar os arquivos
     """
+    _TAMANHO_CHUNK = 10 * 1024 * 1024  # 10 MB por chunk
+
     export_id = exportacao.get("id")
     nome = exportacao.get("name", "desconhecido")
     logger.info(f"Iniciando download do export '{nome}' (ID: {export_id})")
 
-    # Obtém informações sobre os arquivos exportados
-    # O campo 'cloudStorageSink' contém os detalhes do bucket e arquivos
     cloud_sink = exportacao.get("cloudStorageSink", {})
     arquivos_info = cloud_sink.get("files", [])
 
@@ -470,44 +510,87 @@ def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:
 
     logger.info(f"Export '{nome}' contém {len(arquivos_info)} arquivo(s) para download")
 
-    # Garante que a pasta de destino existe
     pasta_destino.mkdir(parents=True, exist_ok=True)
-
-    # Cria o cliente do Cloud Storage
     cliente_storage = obter_cliente_storage()
 
-    arquivos_baixados = []
+    # ── Pré-carrega tamanhos dos blobs em paralelo para calcular progresso por bytes ──
+    def _obter_tamanho(info: dict) -> int:
+        try:
+            blob = cliente_storage.bucket(info["bucketName"]).blob(info["objectName"])
+            blob.reload(timeout=60)
+            return blob.size or 0
+        except Exception as e:
+            logger.warning(f"Não foi possível obter tamanho de {info.get('objectName')}: {e}")
+            return 0
 
-    for info_arquivo in arquivos_info:
-        # Cada arquivo tem bucketName e objectName
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        tamanhos = list(ex.map(_obter_tamanho, arquivos_info))
+
+    tamanho_total = sum(tamanhos)
+    for info, tam in zip(arquivos_info, tamanhos):
+        info["_tamanho"] = tam
+
+    logger.info(
+        f"Export '{nome}' — tamanho total: {tamanho_total / (1024**3):.2f} GB "
+        f"em {len(arquivos_info)} arquivo(s)"
+    )
+
+    # ── Contador compartilhado de bytes baixados (thread-safe) ──
+    bytes_baixados = 0
+    lock = threading.Lock()
+    arquivos_baixados: list[Path] = []
+
+    def _on_chunk(n_bytes: int) -> None:
+        """Atualiza contador global e dispara callback de progresso."""
+        nonlocal bytes_baixados
+        if not on_progresso or tamanho_total == 0:
+            return
+        with lock:
+            bytes_baixados = max(0, bytes_baixados + n_bytes)
+            pct = min(100, int(bytes_baixados / tamanho_total * 100))
+        try:
+            on_progresso(pct)
+        except Exception:
+            pass
+
+    def _baixar_arquivo(info_arquivo: dict) -> Path | None:
+        """Baixa um único arquivo por chunks com retry e progresso por bytes."""
         nome_bucket = info_arquivo.get("bucketName")
         nome_objeto = info_arquivo.get("objectName")
 
         if not nome_bucket or not nome_objeto:
             logger.warning(f"Arquivo sem bucket ou objeto: {info_arquivo}")
-            continue
+            return None
 
-        # Nome do arquivo local (usa apenas o nome final do caminho do objeto)
         nome_arquivo_local = nome_objeto.split("/")[-1]
         caminho_local = pasta_destino / nome_arquivo_local
-
         logger.info(f"Baixando: gs://{nome_bucket}/{nome_objeto} → {caminho_local}")
 
-        # Tenta baixar com retry
         for tentativa in range(1, MAX_TENTATIVAS + 1):
+            bytes_tentativa = 0
             try:
                 bucket = cliente_storage.bucket(nome_bucket)
                 blob = bucket.blob(nome_objeto)
-                blob.download_to_filename(str(caminho_local))
+
+                with open(str(caminho_local), "wb") as f:
+                    with blob.open("rb", chunk_size=_TAMANHO_CHUNK, timeout=300) as source:
+                        while True:
+                            chunk = source.read(_TAMANHO_CHUNK)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            bytes_tentativa += len(chunk)
+                            _on_chunk(len(chunk))
 
                 tamanho_mb = caminho_local.stat().st_size / (1024 * 1024)
-                logger.info(
-                    f"Download concluído: {nome_arquivo_local} ({tamanho_mb:.1f} MB)"
-                )
-                arquivos_baixados.append(caminho_local)
-                break
+                logger.info(f"Download concluído: {nome_arquivo_local} ({tamanho_mb:.1f} MB)")
+                return caminho_local
 
             except Exception as erro:
+                # Desconta bytes desta tentativa falha para não distorcer o progresso
+                if bytes_tentativa:
+                    _on_chunk(-bytes_tentativa)
+
                 logger.error(
                     f"Erro ao baixar {nome_arquivo_local} "
                     f"(tentativa {tentativa}/{MAX_TENTATIVAS}): {erro}"
@@ -521,6 +604,19 @@ def baixar_exportacao(exportacao: dict, pasta_destino: Path) -> list[Path]:
                         f"Falha ao baixar {nome_arquivo_local} "
                         f"após {MAX_TENTATIVAS} tentativas: {erro}"
                     )
+
+    # Paraleliza o download com até 6 threads simultâneas
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futuros = {executor.submit(_baixar_arquivo, info): info for info in arquivos_info}
+        for futuro in as_completed(futuros):
+            resultado = futuro.result()
+            if resultado:
+                with lock:
+                    arquivos_baixados.append(resultado)
+                logger.info(
+                    f"Arquivos concluídos: {len(arquivos_baixados)}/{len(arquivos_info)} "
+                    f"— {bytes_baixados / (1024**3):.2f} GB baixados"
+                )
 
     logger.info(
         f"Download do export '{nome}' finalizado — "

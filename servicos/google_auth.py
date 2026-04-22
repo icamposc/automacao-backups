@@ -41,11 +41,11 @@ SCOPES = [
 
 def _obter_http_autorizado(credenciais: service_account.Credentials) -> google_auth_httplib2.AuthorizedHttp:
     """
-    Cria um cliente HTTP autorizado com o bundle SSL correto.
+    Cria um cliente HTTP autorizado para uso com as APIs do Google.
 
-    O httplib2 não lê REQUESTS_CA_BUNDLE automaticamente, por isso
-    o bundle é passado explicitamente — necessário em ambientes com
-    proxy corporativo (ex: Netskope) que interceptam conexões HTTPS.
+    Em ambientes com proxy corporativo (ex: Netskope), o bundle de certificados
+    padrão pode não ser suficiente. Usamos REQUESTS_CA_BUNDLE ou SSL_CERT_FILE
+    se definidos, para garantir que o certificado corporativo seja aceito.
     """
     ca_bundle = os.getenv("REQUESTS_CA_BUNDLE") or os.getenv("SSL_CERT_FILE")
     http = httplib2.Http(ca_certs=ca_bundle) if ca_bundle else httplib2.Http()

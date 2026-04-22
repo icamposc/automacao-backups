@@ -23,9 +23,10 @@ from utils.logger import obter_logger
 logger = obter_logger("compactacao")
 
 
-def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
+def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> tuple[Path, str]:
     """
-    Compacta todos os arquivos de uma pasta em um único arquivo .zip.
+    Compacta todos os arquivos de uma pasta em um único arquivo .zip
+    e calcula o SHA256 do arquivo gerado em uma única passagem.
 
     Utiliza compressão ZIP_DEFLATED para reduzir o tamanho dos arquivos.
     Todos os arquivos encontrados na pasta de origem (incluindo subpastas)
@@ -36,7 +37,7 @@ def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
         caminho_zip: Caminho completo para o arquivo .zip de saída
 
     Returns:
-        Caminho do arquivo .zip criado
+        Tupla (caminho_zip, sha256_hex) — caminho do ZIP criado e seu hash
 
     Raises:
         Exception: Se a pasta de origem não existir ou estiver vazia,
@@ -98,7 +99,8 @@ def compactar_arquivos(pasta_origem: Path, caminho_zip: Path) -> Path:
         f"(redução de {taxa_compressao:.1f}%)"
     )
 
-    return caminho_zip
+    sha256_hex = calcular_sha256(caminho_zip)
+    return caminho_zip, sha256_hex
 
 
 def calcular_sha256(caminho: Path) -> str:

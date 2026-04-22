@@ -40,7 +40,7 @@ STATUS_CONCLUIDO   = "concluido"
 STATUS_ERRO        = "erro"
 
 
-def registrar_backup(email: str, ticket_id: str, nome: str = None) -> None:
+def registrar_backup(email: str, ticket_id: str, nome: str = None, deletar_conta: bool = True) -> None:
     """
     Registra um novo backup no banco de dados.
 
@@ -49,8 +49,8 @@ def registrar_backup(email: str, ticket_id: str, nome: str = None) -> None:
                     O orquestrador deve capturar e encerrar a task silenciosamente.
     """
     from dados.repositorio_backups import inserir_backup
-    inserir_backup(email, ticket_id, nome)
-    logger.info(f"Backup registrado: {email} (Ticket: {ticket_id})")
+    inserir_backup(email, ticket_id, nome, deletar_conta=deletar_conta)
+    logger.info(f"Backup registrado: {email} (Ticket: {ticket_id}, deletar_conta={deletar_conta})")
 
 
 def atualizar_etapa(email: str, numero_etapa: int, status: str) -> None:
@@ -58,6 +58,12 @@ def atualizar_etapa(email: str, numero_etapa: int, status: str) -> None:
     from dados.repositorio_backups import atualizar_etapa as _atualizar
     _atualizar(email, numero_etapa, status)
     logger.debug(f"Etapa {numero_etapa} de {email} → {status}")
+
+
+def atualizar_progresso(email: str, numero_etapa: int, pct: int) -> None:
+    """Persiste o percentual de progresso de uma etapa (download ou upload)."""
+    from dados.repositorio_backups import atualizar_progresso_etapa
+    atualizar_progresso_etapa(email, numero_etapa, pct)
 
 
 def finalizar_backup(

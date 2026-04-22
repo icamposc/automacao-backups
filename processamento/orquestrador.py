@@ -19,6 +19,7 @@ Histórico:
 ============================================================
 """
 
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -35,18 +36,19 @@ from servicos.jira_atualizacao import (
     comentar_inicio,
     comentar_progresso,
     comentar_sucesso,
-    comentar_erro,
     comentar_conta_excluida,
     transicionar_ticket,
     transicionar_resolvido,
+    transicionar_para_status,
     submeter_formularios_pendentes,
 )
-from config.configuracoes import JIRA_TRANSICAO_EM_ANALISE, JIRA_TRANSICAO_RESOLVIDO, PASTA_VAULT
-from processamento.compactacao import compactar_arquivos, calcular_sha256
+from config.configuracoes import PASTA_VAULT
+from processamento.compactacao import compactar_arquivos
 from processamento.limpeza import limpar_arquivos_temporarios, limpar_arquivo_zip
 from processamento.rastreador import (
     registrar_backup,
     atualizar_etapa,
+    atualizar_progresso,
     finalizar_backup,
     STATUS_EM_ANDAMENTO,
     STATUS_CONCLUIDO,
@@ -103,30 +105,35 @@ def registrar_celery_task_id(email: str, task_id: str) -> None:
         logger.warning(f"Não foi possível salvar celery_task_id: {erro}")
 
 
-def iniciar_backup_async(email: str, ticket_id: str, nome: str = None) -> None:
+def iniciar_backup_async(email: str, ticket_id: str, nome: str = None, deletar_conta: bool = True) -> None:
     """
     Enfileira o backup no Celery para execução assíncrona.
     Retorna imediatamente — o worker processa em background.
 
     Args:
-        email:     E-mail do colaborador desligado
-        ticket_id: Chave do ticket no Jira
-        nome:      Nome do colaborador (opcional)
+        email:         E-mail do colaborador desligado
+        ticket_id:     Chave do ticket no Jira
+        nome:          Nome do colaborador (opcional)
+        deletar_conta: Se True, exclui a conta Google Workspace ao final (padrão: True)
     """
     from worker.tarefas import executar_backup as celery_task
-    result = celery_task.delay(email, ticket_id, nome)
-    logger.info(f"Backup enfileirado no Celery — Task ID: {result.id}, E-mail: {email}")
+    result = celery_task.delay(email, ticket_id, nome, deletar_conta)
+    logger.info(
+        f"Backup enfileirado no Celery — Task ID: {result.id}, E-mail: {email}, "
+        f"Deletar conta: {deletar_conta}"
+    )
 
 
-def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None:
+def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar_conta: bool = True) -> None:
     """
     Executa o fluxo completo de backup de forma SÍNCRONA.
     Chamado diretamente pelo worker Celery.
 
     Args:
-        email:     E-mail do colaborador desligado
-        ticket_id: Chave do ticket no Jira
-        nome:      Nome do colaborador (opcional)
+        email:         E-mail do colaborador desligado
+        ticket_id:     Chave do ticket no Jira
+        nome:          Nome do colaborador (opcional)
+        deletar_conta: Se True, exclui a conta Google Workspace ao final (padrão: True)
     """
     identificador = nome or email
     logger.info(f"{'=' * 60}")
@@ -135,23 +142,24 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
     logger.info(f"{'=' * 60}")
 
     try:
-        registrar_backup(email, ticket_id, nome)
+        registrar_backup(email, ticket_id, nome, deletar_conta=deletar_conta)
     except ValueError as erro:
         # Race condition: dois webhooks chegaram ao mesmo tempo para o mesmo e-mail.
         # O índice único do banco rejeitou a inserção duplicada — encerra sem ação.
         logger.warning(f"Task descartada — {erro}")
         return
 
-    chat_notificar_inicio(email, ticket_id, nome)
+    chat_notificar_inicio(email, ticket_id, nome, deletar_conta=deletar_conta)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pasta_colaborador = PASTA_VAULT / f"{email}_{timestamp}"
     pasta_colaborador.mkdir(parents=True, exist_ok=True)
 
     nome_zip = f"{email}.zip"
-    caminho_zip = PASTA_VAULT / nome_zip
+    caminho_zip = pasta_colaborador / nome_zip  # ZIP dentro da pasta com timestamp — evita colisão entre execuções paralelas
     link_drive = None
     sha256_zip = None
+    _backup_concluido = False
 
     try:
         # ─────────────────────────────────────────────────────────
@@ -159,9 +167,8 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
         # ─────────────────────────────────────────────────────────
         logger.info("[ETAPA 1/8] Notificando Jira sobre início do backup...")
         atualizar_etapa(email, 1, STATUS_EM_ANDAMENTO)
-        comentar_inicio(ticket_id, email)
-        if JIRA_TRANSICAO_EM_ANALISE:
-            transicionar_ticket(ticket_id, JIRA_TRANSICAO_EM_ANALISE)
+        comentar_inicio(ticket_id, email, deletar_conta=deletar_conta)
+        transicionar_para_status(ticket_id, "Em análise")
         atualizar_etapa(email, 1, STATUS_CONCLUIDO)
 
         # ─────────────────────────────────────────────────────────
@@ -259,8 +266,40 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
         pasta_drive = pasta_colaborador / "drive"
 
         try:
-            arquivos_email = baixar_exportacao(export_email_resultado, pasta_email)
-            arquivos_drive = baixar_exportacao(export_drive_resultado, pasta_drive)
+            total_email = len(export_email_resultado.get("cloudStorageSink", {}).get("files", []))
+            total_drive = len(export_drive_resultado.get("cloudStorageSink", {}).get("files", []))
+            total_arquivos_dl = max(total_email + total_drive, 1)
+
+            # Fatores de peso de cada export no progresso global (0–100%)
+            fator_email = total_email / total_arquivos_dl
+            fator_drive = total_drive / total_arquivos_dl
+
+            # Progresso individual de cada export — atualizado pelas threads
+            _pct = {"email": 0, "drive": 0}
+            _lock_pct = threading.Lock()
+
+            def _on_progresso_email(pct):
+                with _lock_pct:
+                    _pct["email"] = pct
+                    global_pct = int(_pct["email"] * fator_email + _pct["drive"] * fator_drive)
+                atualizar_progresso(email, 4, global_pct)
+
+            def _on_progresso_drive(pct):
+                with _lock_pct:
+                    _pct["drive"] = pct
+                    global_pct = int(_pct["email"] * fator_email + _pct["drive"] * fator_drive)
+                atualizar_progresso(email, 4, global_pct)
+
+            # Downloads de e-mail e Drive em paralelo
+            with ThreadPoolExecutor(max_workers=2) as dl_executor:
+                futuro_email_dl = dl_executor.submit(
+                    baixar_exportacao, export_email_resultado, pasta_email, _on_progresso_email
+                )
+                futuro_drive_dl = dl_executor.submit(
+                    baixar_exportacao, export_drive_resultado, pasta_drive, _on_progresso_drive
+                )
+                arquivos_email = futuro_email_dl.result()
+                arquivos_drive = futuro_drive_dl.result()
         except Exception as erro:
             raise ErroDownload(str(erro)) from erro
 
@@ -274,8 +313,7 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
         atualizar_etapa(email, 5, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Compactando arquivos em ZIP...")
 
-        caminho_zip = compactar_arquivos(pasta_colaborador, caminho_zip)
-        sha256_zip = calcular_sha256(caminho_zip)
+        caminho_zip, sha256_zip = compactar_arquivos(pasta_colaborador, caminho_zip)
         logger.info(f"Integridade ZIP — SHA256: {sha256_zip}")
         atualizar_etapa(email, 5, STATUS_CONCLUIDO)
 
@@ -288,7 +326,10 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
 
         try:
             tamanho_mb = caminho_zip.stat().st_size / (1024 * 1024)
-            resultado_upload = fazer_upload(caminho_zip, nome_zip, sha256=sha256_zip)
+            resultado_upload = fazer_upload(
+                caminho_zip, nome_zip, sha256=sha256_zip,
+                on_progresso=lambda pct: atualizar_progresso(email, 6, pct),
+            )
         except Exception as erro:
             raise ErroUpload(str(erro)) from erro
 
@@ -300,38 +341,47 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
         # ─────────────────────────────────────────────────────────
         logger.info("[ETAPA 7/8] Atualizando ticket Jira com resultado...")
         atualizar_etapa(email, 7, STATUS_EM_ANDAMENTO)
-        comentar_sucesso(ticket_id, email, link_drive)
+        comentar_sucesso(ticket_id, email, link_drive, deletar_conta=deletar_conta)
         atualizar_etapa(email, 7, STATUS_CONCLUIDO)
 
         # ─────────────────────────────────────────────────────────
-        # ETAPA 8: Verificar backup e excluir conta
+        # ETAPA 8: Verificar backup + excluir conta (se habilitado)
         # ─────────────────────────────────────────────────────────
-        logger.info("[ETAPA 8/8] Verificando backup no Drive e excluindo conta...")
+        if deletar_conta:
+            logger.info("[ETAPA 8/8] Verificando backup no Drive e excluindo conta...")
+        else:
+            logger.info("[ETAPA 8/8] Verificando backup no Drive (exclusão de conta desativada)...")
         atualizar_etapa(email, 8, STATUS_EM_ANDAMENTO)
-        comentar_progresso(ticket_id, "Verificando backup no Drive Compartilhado antes de excluir a conta...")
 
         arquivo_id = resultado_upload.get("id")
 
-        try:
-            resultado_exclusao = verificar_e_deletar_conta(email, arquivo_id)
-        except Exception as erro:
-            raise ErroExclusaoConta(str(erro)) from erro
+        if deletar_conta:
+            comentar_progresso(ticket_id, "Verificando backup no Drive Compartilhado antes de excluir a conta...")
+            try:
+                resultado_exclusao = verificar_e_deletar_conta(email, arquivo_id)
+            except Exception as erro:
+                raise ErroExclusaoConta(str(erro)) from erro
+            logger.info(f"Conta excluída: {resultado_exclusao}")
+            comentar_conta_excluida(ticket_id, email)
+            chat_notificar_conta_excluida(email, ticket_id, nome)
+        else:
+            logger.info(f"Exclusão de conta desativada para este backup — conta de {email} mantida")
 
-        logger.info(f"Conta excluída: {resultado_exclusao}")
-        comentar_conta_excluida(ticket_id, email)
         submeter_formularios_pendentes(ticket_id)
 
-        if JIRA_TRANSICAO_RESOLVIDO:
-            transicionar_resolvido(ticket_id, JIRA_TRANSICAO_RESOLVIDO)
+        transicionar_resolvido(ticket_id)
 
-        chat_notificar_conta_excluida(email, ticket_id, nome)
         atualizar_etapa(email, 8, STATUS_CONCLUIDO)
 
+        _backup_concluido = True
         finalizar_backup(email, sucesso=True, link_drive=link_drive, sha256_zip=sha256_zip)
-        chat_notificar_sucesso(email, ticket_id, link_drive, nome)
+        chat_notificar_sucesso(email, ticket_id, link_drive, nome, deletar_conta=deletar_conta)
 
         logger.info(f"{'=' * 60}")
-        logger.info(f"BACKUP CONCLUÍDO E CONTA EXCLUÍDA — {identificador}")
+        if deletar_conta:
+            logger.info(f"BACKUP CONCLUÍDO E CONTA EXCLUÍDA — {identificador}")
+        else:
+            logger.info(f"BACKUP CONCLUÍDO (conta mantida) — {identificador}")
         logger.info(f"Link no Drive: {link_drive}")
         logger.info(f"SHA256 ZIP: {sha256_zip}")
         logger.info(f"{'=' * 60}")
@@ -359,7 +409,7 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
     except ErroExclusaoConta as erro:
         # Backup concluído, mas conta não foi excluída — não é erro total
         logger.error(f"ERRO na exclusão da conta de {email}: {erro}")
-        comentar_erro(ticket_id, email, str(erro))
+        _backup_concluido = True
         finalizar_backup(email, sucesso=True, link_drive=link_drive, sha256_zip=sha256_zip)
         notificar_erro_exclusao_conta(email, ticket_id, str(erro), nome)
 
@@ -368,15 +418,17 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None) -> None
         chat_notificar_erro(email, ticket_id, str(erro), nome)
 
     finally:
-        logger.info("Executando limpeza de arquivos temporários...")
-        limpar_arquivos_temporarios(pasta_colaborador)
-        limpar_arquivo_zip(caminho_zip)
+        if _backup_concluido:
+            logger.info("Executando limpeza de arquivos temporários...")
+            limpar_arquivos_temporarios(pasta_colaborador)
+            limpar_arquivo_zip(caminho_zip)
+        else:
+            logger.info("Backup não concluído — arquivos preservados para reprocessamento.")
 
 
 def _tratar_erro(email: str, ticket_id: str, nome: str, mensagem: str) -> None:
-    """Registra o erro no Jira e no rastreador."""
+    """Registra o erro no rastreador. Erros vão apenas para o Google Chat, não para o Jira."""
     logger.error(f"ERRO no backup de {email}: {mensagem}", exc_info=True)
-    comentar_erro(ticket_id, email, mensagem)
     finalizar_backup(email, sucesso=False, erro_mensagem=mensagem)
     logger.error(f"{'=' * 60}")
     logger.error(f"BACKUP FALHOU — {nome or email}")

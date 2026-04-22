@@ -27,7 +27,8 @@ from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from dados.repositorio_backups import existe_backup_concluido_por_ticket
 from processamento.limpeza import limpar_logs_antigos
-from dados.banco import inicializar_banco, marcar_backups_interrompidos
+from dados.banco import inicializar_banco
+from processamento.recuperacao import recuperar_backups_interrompidos
 from utils.logger import obter_logger
 
 logger = obter_logger("servidor")
@@ -42,9 +43,9 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 app.register_blueprint(dashboard_bp)
 
 # ── Inicialização na carga do módulo ───────────────────────────────────────
-# banco e marcação de interrompidos são rápidos e síncronos (necessários antes da 1ª requisição)
+# banco e recuperação são síncronos (necessários antes da 1ª requisição)
 inicializar_banco()
-marcar_backups_interrompidos()
+recuperar_backups_interrompidos()
 
 # limpeza de logs pode demorar — executa em background para não atrasar o startup
 threading.Thread(target=limpar_logs_antigos, daemon=True).start()

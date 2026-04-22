@@ -112,21 +112,22 @@ def _enviar_card(titulo: str, subtitulo: str, secoes: list) -> bool:
         return False
 
 
-def notificar_inicio(email: str, ticket_id: str, nome: str = None) -> bool:
+def notificar_inicio(email: str, ticket_id: str, nome: str = None, deletar_conta: bool = True) -> bool:
     """Notifica o Google Chat que um backup foi iniciado."""
     identificador = nome or email
+    widgets = [
+        {"decoratedText": {"topLabel": "E-mail",  "text": email}},
+        {"decoratedText": {"topLabel": "Ticket",  "text": ticket_id}},
+        {"decoratedText": {"topLabel": "Status",  "text": "Processamento iniciado"}},
+        {"decoratedText": {
+            "topLabel": "Exclusão de conta",
+            "text": "Será excluída ao final" if deletar_conta else "⚠️ NÃO será excluída (desativado)",
+        }},
+    ]
     return _enviar_card(
         titulo="🔄 Backup Iniciado",
         subtitulo=f"Colaborador: {identificador}",
-        secoes=[
-            {
-                "widgets": [
-                    {"decoratedText": {"topLabel": "E-mail", "text": email}},
-                    {"decoratedText": {"topLabel": "Ticket", "text": ticket_id}},
-                    {"decoratedText": {"topLabel": "Status", "text": "Processamento iniciado"}},
-                ]
-            }
-        ],
+        secoes=[{"widgets": widgets}],
     )
 
 
@@ -150,22 +151,24 @@ def notificar_progresso(email: str, ticket_id: str, etapa: int,
 
 
 def notificar_sucesso(email: str, ticket_id: str, link_drive: str,
-                      nome: str = None) -> bool:
+                      nome: str = None, deletar_conta: bool = True) -> bool:
     """Notifica o Google Chat que o backup foi concluído com sucesso."""
     identificador = nome or email
+    titulo = "✅ Backup Concluído" if deletar_conta else "✅ Backup Concluído (conta mantida)"
+    widgets = [
+        {"decoratedText": {"topLabel": "E-mail",         "text": email}},
+        {"decoratedText": {"topLabel": "Ticket",         "text": ticket_id}},
+        {"decoratedText": {"topLabel": "Status",         "text": "Backup concluído com sucesso"}},
+        {"decoratedText": {"topLabel": "Link do Backup", "text": link_drive}},
+        {"decoratedText": {
+            "topLabel": "Conta Google Workspace",
+            "text": "Excluída" if deletar_conta else "⚠️ Mantida (exclusão desativada)",
+        }},
+    ]
     return _enviar_card(
-        titulo="✅ Backup Concluído",
+        titulo=titulo,
         subtitulo=f"Colaborador: {identificador}",
-        secoes=[
-            {
-                "widgets": [
-                    {"decoratedText": {"topLabel": "E-mail", "text": email}},
-                    {"decoratedText": {"topLabel": "Ticket", "text": ticket_id}},
-                    {"decoratedText": {"topLabel": "Status", "text": "Backup concluído com sucesso"}},
-                    {"decoratedText": {"topLabel": "Link do Backup", "text": link_drive}},
-                ]
-            }
-        ],
+        secoes=[{"widgets": widgets}],
     )
 
 

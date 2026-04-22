@@ -1,0 +1,171 @@
+# ============================================================
+# Docker Compose — Produção (Portainer)
+# ============================================================
+# Serviços:
+#   redis    — broker e backend do Celery
+#   servidor — Flask/Gunicorn (recebe webhooks e serve o dashboard)
+#   worker   — Celery (processa os backups em background)
+#
+# Volumes:
+#   storage_data — SQLite (SSD, named volume gerenciado pelo Docker)
+#   redis_data   — Redis persistence (SSD, named volume)
+#   logs_data    — Logs da aplicação (SSD, named volume)
+#   temp_data    — Arquivos temporários (SSD, named volume)
+#   /mnt/hdd/vault — Exports do Vault e ZIPs (HDD, bind mount)
+#
+# Pré-requisito no host:
+#   mkdir -p /mnt/hdd/vault
+#   chown 1000:1000 /mnt/hdd/vault
+#
+# Deploy no Portainer:
+#   Stacks → Add stack → Upload este arquivo
+#   Preencher variáveis de ambiente na aba "Env" ou via arquivo .env
+# ============================================================
+
+services:
+
+  # ─── Redis ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: automacao_backups_redis
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "app=automacao-backups"
+      - "componente=redis"
+
+  # ─── Servidor (Flask / Gunicorn) ─────────────────────────
+  servidor:
+    image: automacao-backups:latest
+    container_name: automacao_backups_servidor
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    environment:
+      # ── Variáveis de infraestrutura (fixas por ambiente) ──
+      PYTHONPATH: /app
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/storage/backups.db
+      PASTA_LOGS: /app/logs
+      PASTA_TEMP: /app/temp
+      PASTA_VAULT: /mnt/hdd/vault
+      # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
+      GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
+      SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
+      REQUESTS_CA_BUNDLE: /app/config/credenciais/ca-bundle.crt
+    ports:
+      - "5000:5000"
+    volumes:
+      - /opt/automacao-backups/.env:/app/.env:ro
+      - /opt/automacao-backups/config/credenciais:/app/config/credenciais:ro
+      - storage_data:/app/storage
+      - logs_data:/app/logs
+      - temp_data:/app/temp
+      - /mnt/hdd/vault:/mnt/hdd/vault
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: >
+      gunicorn
+        --bind 0.0.0.0:5000
+        --workers 2
+        --timeout 120
+        --access-logfile /app/logs/gunicorn_acesso.log
+        --error-logfile /app/logs/gunicorn_erro.log
+        --log-level info
+        app.servidor:app
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    labels:
+      - "app=automacao-backups"
+      - "componente=servidor"
+
+  # ─── Worker (Celery) ─────────────────────────────────────
+  worker:
+    image: automacao-backups:latest
+    container_name: automacao_backups_worker
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    environment:
+      # ── Variáveis de infraestrutura (fixas por ambiente) ──
+      PYTHONPATH: /app
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/storage/backups.db
+      PASTA_LOGS: /app/logs
+      PASTA_TEMP: /app/temp
+      PASTA_VAULT: /mnt/hdd/vault
+      # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
+      GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
+      SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
+      REQUESTS_CA_BUNDLE: /app/config/credenciais/ca-bundle.crt
+    volumes:
+      - /opt/automacao-backups/.env:/app/.env:ro
+      - /opt/automacao-backups/config/credenciais:/app/config/credenciais:ro
+      - storage_data:/app/storage
+      - logs_data:/app/logs
+      - temp_data:/app/temp
+      - /mnt/hdd/vault:/mnt/hdd/vault
+    depends_on:
+      redis:
+        condition: service_healthy
+      servidor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping --destination worker@$(hostname) --timeout 5"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    command: >
+      celery -A worker.celery_app worker
+        --loglevel=info
+        --pool=threads
+        --concurrency=10
+        --queues=celery
+        --hostname=worker@%h
+        --logfile=/app/logs/celery_worker.log
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
+    labels:
+      - "app=automacao-backups"
+      - "componente=worker"
+
+# ─── Rede interna ─────────────────────────────────────────
+networks:
+  automacao_net:
+    driver: bridge
+
+# ─── Volumes persistentes ─────────────────────────────────
+volumes:
+  redis_data:
+  storage_data:
+  logs_data:
+  temp_data:

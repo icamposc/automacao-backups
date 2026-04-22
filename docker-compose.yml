@@ -1,0 +1,125 @@
+# ============================================================
+# Docker Compose — Automação de Backups
+# ============================================================
+# Serviços:
+#   redis    — broker e backend do Celery
+#   servidor — Flask/Gunicorn (recebe webhooks)
+#   worker   — Celery (processa os backups em background)
+#
+# Volumes:
+#   storage_data — SQLite (SSD, via named volume)
+#   redis_data   — Redis persistence (SSD, via named volume)
+#   logs_data    — Logs da aplicação (SSD, via named volume)
+#   temp_data    — Arquivos temporários: downloads PST/ZIP (HDD)
+#                  → Bind mount: /mnt/hdd/automacao-backups/temp
+#
+# Pré-requisito no host (Proxmox VM):
+#   mkdir -p /mnt/hdd/automacao-backups/temp
+#   chown 1000:1000 /mnt/hdd/automacao-backups/temp
+#
+# Uso:
+#   docker compose up -d            → Sobe tudo em background
+#   docker compose logs -f worker   → Acompanha logs do worker
+#   docker compose down             → Para e remove os containers
+# ============================================================
+
+services:
+
+  # ─── Redis ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Servidor (Flask / Gunicorn) ─────────────────────────
+  servidor:
+    build: .
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/storage/backups.db
+      PASTA_LOGS: /app/logs
+      PASTA_TEMP: /app/temp
+      PASTA_VAULT: /mnt/hdd/vault
+    ports:
+      - "${SERVIDOR_PORTA:-5000}:5000"
+    volumes:
+      # Credenciais Google (somente leitura — nunca bake no image)
+      - ./config/credenciais:/app/config/credenciais:ro
+      # SQLite e logs no SSD (named volumes gerenciados pelo Docker)
+      - storage_data:/app/storage
+      - logs_data:/app/logs
+      # Arquivos temporários no SSD (named volume)
+      - temp_data:/app/temp
+      # Exports do Vault (PST/ZIP) no HDD — bind mount direto
+      - /mnt/hdd/vault:/mnt/hdd/vault
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    command: >
+      gunicorn
+        --bind 0.0.0.0:5000
+        --workers 2
+        --timeout 120
+        --access-logfile /app/logs/gunicorn_acesso.log
+        --error-logfile /app/logs/gunicorn_erro.log
+        --log-level info
+        app.servidor:app
+
+  # ─── Worker (Celery) ─────────────────────────────────────
+  worker:
+    build: .
+    restart: unless-stopped
+    networks:
+      - automacao_net
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/storage/backups.db
+      PASTA_LOGS: /app/logs
+      PASTA_TEMP: /app/temp
+      PASTA_VAULT: /mnt/hdd/vault
+    volumes:
+      - ./config/credenciais:/app/config/credenciais:ro
+      - storage_data:/app/storage
+      - logs_data:/app/logs
+      # Arquivos temporários no SSD (named volume)
+      - temp_data:/app/temp
+      # Exports do Vault (PST/ZIP) no HDD — bind mount direto
+      - /mnt/hdd/vault:/mnt/hdd/vault
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A worker.celery_app worker
+        --loglevel=info
+        --pool=threads
+        --concurrency=10
+        --queues=celery
+        --hostname=worker@%h
+        --logfile=/app/logs/celery_worker.log
+
+# ─── Rede interna ─────────────────────────────────────────
+networks:
+  automacao_net:
+    driver: bridge
+
+# ─── Volumes persistentes ─────────────────────────────────
+volumes:
+  redis_data:
+  storage_data:
+  logs_data:
+  # temp é efêmero — named volume no SSD (Docker gerencia)
+  temp_data:

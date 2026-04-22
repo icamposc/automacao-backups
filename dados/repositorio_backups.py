@@ -12,6 +12,7 @@ Descrição: Camada de acesso a dados para a tabela 'backups'
 """
 
 import sqlite3
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -19,6 +20,12 @@ from dados.banco import obter_conexao
 from utils.logger import obter_logger
 
 logger = obter_logger("repositorio_backups")
+
+# Debounce para atualizar_progresso_etapa: evita gravações excessivas no SQLite
+# a cada chunk baixado/enviado. Persiste no máximo uma vez por janela de tempo,
+# exceto quando o progresso atinge 100% (sempre persiste o valor final).
+_DEBOUNCE_SEGUNDOS = 2
+_ultimo_progresso: dict = {}  # (email, numero_etapa) → (monotonic_ts, pct)
 
 # Definição das etapas (espelhada de rastreador para evitar importação circular)
 _ETAPAS_PADRAO = [
@@ -37,7 +44,7 @@ _ETAPAS_PADRAO = [
 # Escrita
 # ─────────────────────────────────────────────────────────────────────────────
 
-def inserir_backup(email: str, ticket_id: str, nome: str = None) -> int:
+def inserir_backup(email: str, ticket_id: str, nome: str = None, deletar_conta: bool = True) -> int:
     """
     Insere um novo backup e suas 8 etapas. Retorna o ID gerado.
 
@@ -48,9 +55,9 @@ def inserir_backup(email: str, ticket_id: str, nome: str = None) -> int:
     conn = obter_conexao()
     try:
         cursor = conn.execute(
-            """INSERT INTO backups (email, ticket_id, nome, status_geral, inicio)
-               VALUES (?, ?, ?, 'em_andamento', ?)""",
-            (email, ticket_id, nome or email, datetime.now(timezone.utc).isoformat()),
+            """INSERT INTO backups (email, ticket_id, nome, status_geral, inicio, deletar_conta)
+               VALUES (?, ?, ?, 'em_andamento', ?, ?)""",
+            (email, ticket_id, nome or email, datetime.now(timezone.utc).isoformat(), int(deletar_conta)),
         )
     except sqlite3.IntegrityError:
         # Índice único parcial detectou tentativa duplicada (race condition entre webhooks)
@@ -124,6 +131,32 @@ def finalizar_backup(
     logger.debug(f"Backup finalizado: id={backup_id}, sucesso={sucesso}")
 
 
+def atualizar_progresso_etapa(email: str, numero_etapa: int, pct: int) -> None:
+    """
+    Persiste o percentual de progresso de uma etapa em andamento.
+
+    Aplica debounce: só escreve no SQLite se passaram pelo menos
+    _DEBOUNCE_SEGUNDOS desde a última gravação, ou se o progresso atingiu 100%.
+    Evita I/O excessivo durante downloads/uploads por chunk.
+    """
+    chave = (email, numero_etapa)
+    agora = time.monotonic()
+    ultimo = _ultimo_progresso.get(chave)
+    if ultimo is not None and pct != 100 and (agora - ultimo[0]) < _DEBOUNCE_SEGUNDOS:
+        return  # dentro da janela de debounce — descarta
+    _ultimo_progresso[chave] = (agora, pct)
+
+    backup_id = _obter_id_ativo(email)
+    if backup_id is None:
+        return
+    conn = obter_conexao()
+    conn.execute(
+        "UPDATE etapas_backup SET progresso_pct = ? WHERE backup_id = ? AND numero = ?",
+        (pct, backup_id, numero_etapa),
+    )
+    conn.commit()
+
+
 def salvar_celery_task_id(email: str, task_id: str) -> None:
     """Associa o ID da task Celery ao backup ativo."""
     backup_id = _obter_id_ativo(email)
@@ -140,6 +173,30 @@ def salvar_celery_task_id(email: str, task_id: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Leitura
 # ─────────────────────────────────────────────────────────────────────────────
+
+def listar_interrompidos_para_recuperacao() -> list:
+    """
+    Retorna todos os backups que estavam 'em_andamento' antes do restart.
+    Deve ser chamada ANTES de marcar_backups_interrompidos() para preservar
+    os dados necessários para re-enfileirar os processos.
+
+    Returns:
+        Lista de dicts com email, ticket_id, nome e deletar_conta de cada backup interrompido.
+    """
+    conn = obter_conexao()
+    rows = conn.execute(
+        "SELECT email, ticket_id, nome, deletar_conta FROM backups WHERE status_geral = 'em_andamento'"
+    ).fetchall()
+    return [
+        {
+            "email":        r["email"],
+            "ticket_id":    r["ticket_id"],
+            "nome":         r["nome"],
+            "deletar_conta": bool(r["deletar_conta"]),
+        }
+        for r in rows
+    ]
+
 
 def existe_backup_em_andamento(email: str) -> bool:
     """True se há um backup ativo para o e-mail."""
@@ -260,7 +317,7 @@ def _carregar_etapas_em_lote(backup_ids: list) -> dict:
     placeholders = ",".join("?" * len(backup_ids))
     conn = obter_conexao()
     rows = conn.execute(
-        f"""SELECT backup_id, numero, nome, descricao, status, inicio, fim
+        f"""SELECT backup_id, numero, nome, descricao, status, inicio, fim, progresso_pct
             FROM etapas_backup
             WHERE backup_id IN ({placeholders})
             ORDER BY backup_id, numero""",

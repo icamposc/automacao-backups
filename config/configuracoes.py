@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 _RAIZ_PROJETO = Path(__file__).resolve().parent.parent
 load_dotenv(_RAIZ_PROJETO / ".env")
 
+
 # ============================================================
 # Certificado SSL — Ambientes corporativos (ex: Netskope)
 # ============================================================

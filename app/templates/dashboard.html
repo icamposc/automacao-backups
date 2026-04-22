@@ -247,6 +247,43 @@
             display: block;
         }
 
+        /* Barra de progresso download/upload */
+        .mini-progresso {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .mini-progresso-label {
+            white-space: nowrap;
+            min-width: 84px;
+            font-weight: 500;
+        }
+
+        .mini-progresso-label.download { color: var(--cor-aviso); }
+        .mini-progresso-label.upload   { color: var(--cor-primaria); }
+
+        .mini-progresso-trilha {
+            flex: 1;
+            height: 5px;
+            border-radius: 3px;
+            background: var(--cor-borda);
+            overflow: hidden;
+            min-width: 80px;
+        }
+
+        .mini-progresso-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 1s ease;
+        }
+
+        .mini-progresso-fill.download { background: var(--cor-aviso); }
+        .mini-progresso-fill.upload   { background: var(--cor-primaria); }
+
         /* Mensagem vazia */
         .vazio {
             text-align: center;
@@ -357,6 +394,32 @@
         .btn-iniciar:hover { background: #2563eb; }
         .btn-iniciar:disabled { opacity: 0.5; cursor: not-allowed; }
 
+        .campo-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding-bottom: 2px;
+        }
+
+        .campo-toggle input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--cor-erro);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .campo-toggle label {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .campo-toggle input:checked + label {
+            color: var(--cor-erro);
+        }
+
         .feedback-manual {
             margin-top: 0.875rem;
             padding: 0.65rem 0.875rem;
@@ -375,6 +438,67 @@
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.3);
             color: var(--cor-erro);
+        }
+
+        /* Cabeçalho da seção com botão de ação */
+        .secao-cabecalho {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .secao-cabecalho .secao-titulo {
+            margin-bottom: 0;
+        }
+
+        /* Painel de retry */
+        .painel-refazer {
+            display: none;
+            align-items: center;
+            gap: 0.75rem;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+        .painel-refazer .contagem {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .btn-refazer {
+            background: var(--cor-erro);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.45rem 0.9rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            transition: opacity 0.15s;
+        }
+
+        .btn-refazer:hover { opacity: 0.85; }
+        .btn-refazer:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Checkbox na tabela */
+        .chk-erro {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--cor-erro);
+            cursor: pointer;
+        }
+
+        th.col-chk, td.col-chk {
+            width: 36px;
+            text-align: center;
+            padding: 0.5rem 0.25rem;
         }
 
         /* Responsividade */
@@ -433,6 +557,10 @@
                     <label for="inp-ticket">Ticket Jira</label>
                     <input type="text" id="inp-ticket" placeholder="Ex: SPN-999 (opcional)" />
                 </div>
+                <div class="campo-toggle">
+                    <input type="checkbox" id="inp-deletar-conta" checked />
+                    <label for="inp-deletar-conta">Deletar conta após backup</label>
+                </div>
                 <button class="btn-iniciar" id="btn-iniciar" onclick="iniciarBackupManual()">
                     Iniciar Backup
                 </button>
@@ -487,14 +615,24 @@
 
         <!-- Histórico -->
         <section class="secao">
-            <h2 class="secao-titulo">
-                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--cor-texto-suave);"></span>
-                Histórico Recente
-            </h2>
+            <div class="secao-cabecalho">
+                <h2 class="secao-titulo">
+                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--cor-texto-suave);"></span>
+                    Histórico Recente
+                </h2>
+                <div class="painel-refazer" id="painel-refazer">
+                    <span class="contagem" id="contagem-selecionados">0 selecionado(s)</span>
+                    <button class="btn-refazer" id="btn-refazer" onclick="refazerSelecionados()">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                        Refazer Selecionados
+                    </button>
+                </div>
+            </div>
             <div class="tabela-container">
                 <table>
                     <thead>
                         <tr>
+                            <th class="col-chk"><input type="checkbox" id="chk-todos-erros" class="chk-erro" title="Selecionar todos com erro" onchange="selecionarTodosErros(this.checked)" /></th>
                             <th>Colaborador</th>
                             <th>Ticket</th>
                             <th>Início</th>
@@ -504,7 +642,7 @@
                         </tr>
                     </thead>
                     <tbody id="tabela-historico">
-                        <tr><td colspan="6" class="vazio">Nenhum backup no histórico</td></tr>
+                        <tr><td colspan="7" class="vazio">Nenhum backup no histórico</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -551,7 +689,7 @@
         }
 
         /**
-         * Cria a barra de progresso com as 8 etapas
+         * Cria a barra de progresso com as 8 etapas + mini-barra para download/upload
          */
         function criarBarraProgresso(etapas) {
             let html = '<div class="progresso-etapas">';
@@ -561,6 +699,21 @@
                          </div>`;
             }
             html += '</div>';
+
+            for (const etapa of etapas) {
+                if (etapa.status === 'em_andamento' && etapa.progresso_pct != null && (etapa.numero === 4 || etapa.numero === 6)) {
+                    const tipo  = etapa.numero === 4 ? 'download' : 'upload';
+                    const label = etapa.numero === 4 ? 'Download' : 'Upload';
+                    html += `
+                        <div class="mini-progresso">
+                            <span class="mini-progresso-label ${tipo}">${label}: ${etapa.progresso_pct}%</span>
+                            <div class="mini-progresso-trilha">
+                                <div class="mini-progresso-fill ${tipo}" style="width:${etapa.progresso_pct}%"></div>
+                            </div>
+                        </div>`;
+                }
+            }
+
             return html;
         }
 
@@ -604,7 +757,15 @@
                 } else {
                     tabelaAtivos.innerHTML = ativos.map(backup => {
                         const atual = etapaAtual(backup.etapas);
-                        const nomeEtapa = atual ? `${atual.numero}/8 — ${atual.nome}` : 'Iniciando...';
+                        let nomeEtapa;
+                        if (!atual) {
+                            nomeEtapa = 'Iniciando...';
+                        } else if (atual.progresso_pct != null && atual.status === 'em_andamento' && (atual.numero === 4 || atual.numero === 6)) {
+                            const labelEtapa = atual.numero === 4 ? 'Download' : 'Upload';
+                            nomeEtapa = `${atual.numero}/8 — ${labelEtapa} (${atual.progresso_pct}%)`;
+                        } else {
+                            nomeEtapa = `${atual.numero}/8 — ${atual.nome}`;
+                        }
                         return `<tr>
                             <td>
                                 <div class="detalhe-nome">${backup.nome}</div>
@@ -621,17 +782,25 @@
 
                 // Atualizar tabela de histórico
                 const tabelaHistorico = document.getElementById('tabela-historico');
-                if (historico.length === 0) {
-                    tabelaHistorico.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum backup no histórico</td></tr>';
+                const dadosHistorico = historico.dados || [];
+                if (dadosHistorico.length === 0) {
+                    tabelaHistorico.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum backup no histórico</td></tr>';
                 } else {
-                    tabelaHistorico.innerHTML = historico.map(backup => {
+                    tabelaHistorico.innerHTML = dadosHistorico.map(backup => {
                         const linkHtml = backup.link_drive
                             ? `<a href="${backup.link_drive}" target="_blank">Abrir no Drive</a>`
                             : '—';
                         const erroInfo = backup.erro_mensagem
                             ? `<br><span style="font-size:0.7rem;color:var(--cor-erro);">${backup.erro_mensagem}</span>`
                             : '';
+                        const emailEsc    = (backup.email || '').replace(/"/g, '&quot;');
+                        const nomeEsc     = (backup.nome || '').replace(/"/g, '&quot;');
+                        const ticketEsc   = (backup.ticket_id || '').replace(/"/g, '&quot;');
+                        const chkCell = backup.status_geral === 'erro'
+                            ? `<td class="col-chk"><input type="checkbox" class="chk-erro chk-backup-erro" data-email="${emailEsc}" data-nome="${nomeEsc}" data-ticket="${ticketEsc}" onchange="atualizarPainelRefazer()" /></td>`
+                            : `<td class="col-chk"></td>`;
                         return `<tr>
+                            ${chkCell}
                             <td>
                                 <div class="detalhe-nome">${backup.nome}</div>
                                 <div class="detalhe-email">${backup.email}</div>
@@ -645,6 +814,9 @@
                     }).join('');
                 }
 
+                // Sincroniza estado do painel de retry após atualização da tabela
+                atualizarPainelRefazer();
+
                 // Atualizar timestamp
                 document.getElementById('ultima-atualizacao').textContent =
                     `Última: ${new Date().toLocaleTimeString('pt-BR')}`;
@@ -655,14 +827,107 @@
         }
 
         /**
+         * Atualiza visibilidade do painel de retry e a contagem de selecionados
+         */
+        function atualizarPainelRefazer() {
+            const checkboxes  = document.querySelectorAll('.chk-backup-erro');
+            const selecionados = document.querySelectorAll('.chk-backup-erro:checked');
+            const painel      = document.getElementById('painel-refazer');
+            const contagem    = document.getElementById('contagem-selecionados');
+            const chkTodos    = document.getElementById('chk-todos-erros');
+
+            const total = checkboxes.length;
+            const n     = selecionados.length;
+
+            contagem.textContent = `${n} selecionado(s)`;
+            painel.style.display = n > 0 ? 'flex' : 'none';
+
+            // Atualiza estado "selecionar todos"
+            if (chkTodos) {
+                chkTodos.indeterminate = n > 0 && n < total;
+                chkTodos.checked = total > 0 && n === total;
+            }
+        }
+
+        /**
+         * Seleciona ou desmarca todos os checkboxes de erro
+         */
+        function selecionarTodosErros(marcar) {
+            document.querySelectorAll('.chk-backup-erro').forEach(chk => {
+                chk.checked = marcar;
+            });
+            atualizarPainelRefazer();
+        }
+
+        /**
+         * Envia os backups selecionados para reprocessamento
+         */
+        async function refazerSelecionados() {
+            const checkboxes = document.querySelectorAll('.chk-backup-erro:checked');
+            if (checkboxes.length === 0) return;
+
+            const nomes = Array.from(checkboxes).map(c => c.dataset.email).join('\n• ');
+            const confirmacao = confirm(
+                `Confirma o reprocessamento de ${checkboxes.length} backup(s)?\n\n• ${nomes}\n\nObs: a exclusão da conta NÃO será realizada nesta retentativa.`
+            );
+            if (!confirmacao) return;
+
+            const btn = document.getElementById('btn-refazer');
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                Processando...`;
+
+            const backups = Array.from(checkboxes).map(chk => ({
+                email:     chk.dataset.email,
+                nome:      chk.dataset.nome   || null,
+                ticket_id: chk.dataset.ticket || null,
+            }));
+
+            try {
+                const resp = await fetch('/api/backups/refazer', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ backups }),
+                });
+
+                const dados = await resp.json();
+                if (!resp.ok) {
+                    mostrarFeedback(dados.erro || 'Erro ao enviar solicitação.', 'erro');
+                    return;
+                }
+
+                const resultados  = dados.resultados || [];
+                const iniciados   = resultados.filter(r => r.status === 'iniciado').length;
+                const emAndamento = resultados.filter(r => r.status === 'ja_em_processamento').length;
+                const erros       = resultados.filter(r => r.status === 'erro').length;
+
+                let msg = `${iniciados} backup(s) reiniciado(s).`;
+                if (emAndamento) msg += ` ${emAndamento} já em andamento (ignorado).`;
+                if (erros)       msg += ` ${erros} falhou ao enfileirar.`;
+
+                mostrarFeedback(msg, iniciados > 0 ? 'sucesso' : 'erro');
+                atualizarDashboard();
+            } catch (e) {
+                mostrarFeedback('Falha de comunicação com o servidor.', 'erro');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                    Refazer Selecionados`;
+            }
+        }
+
+        /**
          * Envia o formulário de backup manual para a API
          */
         async function iniciarBackupManual() {
-            const email     = document.getElementById('inp-email').value.trim();
-            const nome      = document.getElementById('inp-nome').value.trim();
-            const ticketId  = document.getElementById('inp-ticket').value.trim();
-            const btn       = document.getElementById('btn-iniciar');
-            const feedback  = document.getElementById('feedback-manual');
+            const email        = document.getElementById('inp-email').value.trim();
+            const nome         = document.getElementById('inp-nome').value.trim();
+            const ticketId     = document.getElementById('inp-ticket').value.trim();
+            const deletarConta = document.getElementById('inp-deletar-conta').checked;
+            const btn          = document.getElementById('btn-iniciar');
+            const feedback     = document.getElementById('feedback-manual');
 
             if (!email) {
                 mostrarFeedback('E-mail é obrigatório.', 'erro');
@@ -674,7 +939,8 @@
             const confirmacao = confirm(
                 `Confirma o início do backup manual?\n\nE-mail: ${email}` +
                 (nome ? `\nNome: ${nome}` : '') +
-                (ticketId ? `\nTicket: ${ticketId}` : '\nTicket: gerado automaticamente')
+                (ticketId ? `\nTicket: ${ticketId}` : '\nTicket: gerado automaticamente') +
+                `\nDeletar conta: ${deletarConta ? 'SIM' : 'NÃO'}`
             );
             if (!confirmacao) return;
 
@@ -688,8 +954,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         email,
-                        nome: nome || null,
-                        ticket_id: ticketId || null,
+                        nome:          nome || null,
+                        ticket_id:     ticketId || null,
+                        deletar_conta: deletarConta,
                     }),
                 });
 
