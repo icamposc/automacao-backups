@@ -35,7 +35,7 @@ from config.configuracoes import (
     MAX_EXPORTS_SIMULTANEOS,
 )
 from utils.excecoes import ErroVaultTimeout
-from utils.retry import calcular_backoff
+from utils.retry import calcular_backoff, chamar_com_retry_rede
 from utils.logger import obter_logger
 
 logger = obter_logger("vault_exportacao")
@@ -388,7 +388,24 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
     """
     logger.info(f"Iniciando monitoramento do export: {export_id}")
 
-    servico = obter_servico_vault()
+    # Cliente Vault em container mutável para permitir recriação dentro
+    # do callback de retry — sockets ociosos por dezenas de minutos podem
+    # ser derrubados pelo lado remoto e quebrar a próxima requisição.
+    cliente = {"servico": obter_servico_vault(), "criado_em": time.time()}
+
+    # Janela após a qual recriamos preventivamente o cliente para evitar
+    # que a renovação do token OAuth (a cada 1h) ocorra sobre uma conexão
+    # TCP zumbi — origem do BrokenPipeError observado em produção (07/05/2026).
+    SERVICO_TTL_SEGUNDOS = 1800
+
+    # Cap absoluto do intervalo entre polls. NAT/LB tendem a derrubar
+    # sockets ociosos por mais de ~10 min, então mantemos abaixo disso.
+    INTERVALO_MAXIMO_SEGUNDOS = 300
+
+    def _recriar_servico():
+        cliente["servico"] = obter_servico_vault()
+        cliente["criado_em"] = time.time()
+
     tempo_inicio = time.time()
     ultima_exportacao = None
 
@@ -404,12 +421,25 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
                     stats=stats,
                 )
 
-            # Consulta o status atual da exportação
-            exportacao = (
-                servico.matters()
-                .exports()
-                .get(matterId=VAULT_MATTER_ID, exportId=export_id)
-                .execute()
+            # Recria o cliente preventivamente quando ele já tem mais que TTL,
+            # garantindo que o próximo refresh do token OAuth use uma conexão fresca.
+            if time.time() - cliente["criado_em"] > SERVICO_TTL_SEGUNDOS:
+                logger.debug(f"Recriando cliente Vault preventivamente (TTL {SERVICO_TTL_SEGUNDOS}s)")
+                _recriar_servico()
+
+            # Consulta o status atual da exportação com retry contra erros
+            # transientes de rede (BrokenPipe, ConnectionReset, SSLError, etc.).
+            exportacao = chamar_com_retry_rede(
+                fn_chamada=lambda: (
+                    cliente["servico"]
+                    .matters()
+                    .exports()
+                    .get(matterId=VAULT_MATTER_ID, exportId=export_id)
+                    .execute()
+                ),
+                fn_recriar=_recriar_servico,
+                max_tentativas=5,
+                contexto=f"export {export_id}",
             )
             ultima_exportacao = exportacao
 
@@ -451,13 +481,14 @@ def monitorar_exportacao(export_id: str, semaforo_adquirido: bool = True) -> dic
 
             # Backoff adaptativo: aumenta o intervalo conforme o tempo passa,
             # pois exports longos (Drive com muitos arquivos) demoram horas.
-            # Caps em 10× o intervalo base para não ficar polling demais nem de menos.
-            fator = min(10, 1 + int(tempo_decorrido / 3600))  # +1 fator por hora decorrida
-            intervalo = POLLING_INTERVALO_SEGUNDOS * fator
+            # Cap em INTERVALO_MAXIMO_SEGUNDOS (300s) para que a conexão TCP
+            # não fique ociosa o suficiente para ser derrubada.
+            fator = 1 + int(tempo_decorrido / 3600)  # +1 fator por hora decorrida
+            intervalo = min(INTERVALO_MAXIMO_SEGUNDOS, POLLING_INTERVALO_SEGUNDOS * fator)
             logger.debug(
                 f"Export {export_id} em andamento. "
                 f"Próxima verificação em {intervalo}s "
-                f"(fator adaptativo: {fator}×)..."
+                f"(fator adaptativo: {fator}×, cap {INTERVALO_MAXIMO_SEGUNDOS}s)..."
             )
             time.sleep(intervalo)
 
