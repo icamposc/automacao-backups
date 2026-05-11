@@ -33,6 +33,7 @@ from config.configuracoes import (
     POLLING_INTERVALO_SEGUNDOS,
     TIMEOUT_MAXIMO_SEGUNDOS,
     MAX_EXPORTS_SIMULTANEOS,
+    DOWNLOAD_MAX_WORKERS,
 )
 from utils.excecoes import ErroVaultTimeout
 from utils.retry import calcular_backoff, chamar_com_retry_rede
@@ -636,11 +637,12 @@ def baixar_exportacao(
                         f"após {MAX_TENTATIVAS} tentativas: {erro}"
                     )
 
-    # Paraleliza com 2 threads — o destino é HDD rotacional (/mnt/hdd).
-    # Acima de 2 threads o iostat mostra %util=100% com r/s=w/s=0
-    # (contenção na fila do controlador virtio). Histórico: travamento
-    # do backup do David Ortiz em 08/05/2026 com max_workers=6.
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # Paralelismo controlado por DOWNLOAD_MAX_WORKERS (env var).
+    # Padrão 2 = otimizado para HDD rotacional (/mnt/hdd): acima disso
+    # o iostat mostra %util=100% com r/s=w/s=0 — contenção na fila do
+    # controlador virtio. Foi a causa raiz do travamento de 08/05/2026
+    # com max_workers=6 fixo. Em NVMe pode subir para 6 ou 8.
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_MAX_WORKERS) as executor:
         futuros = {executor.submit(_baixar_arquivo, info): info for info in arquivos_info}
         for futuro in as_completed(futuros):
             resultado = futuro.result()

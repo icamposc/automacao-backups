@@ -113,11 +113,16 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # --concurrency=4 (alinha com a pendencia 1): conservador para o
+    # HDD atual em /mnt/hdd, ainda dobra a capacidade efetiva de PROD
+    # (que estava em 2). Limite Vault de 18 exports simultaneos = 9
+    # backups paralelos, entao 4 deixa folga. Quando o storage migrar
+    # para NVMe, revisar para 8 ou mais.
     command: >
       celery -A worker.celery_app worker
         --loglevel=info
         --pool=threads
-        --concurrency=10
+        --concurrency=4
         --queues=celery
         --hostname=worker@%h
         --logfile=/app/logs/celery_worker.log

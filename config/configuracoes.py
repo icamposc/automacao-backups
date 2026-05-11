@@ -138,6 +138,16 @@ MAX_EXPORTS_SIMULTANEOS = int(
     _obter_variavel("MAX_EXPORTS_SIMULTANEOS", obrigatoria=False, padrao="18")
 )
 
+# Threads paralelas no download de arquivos do Cloud Storage por backup.
+# Padrão 2 = otimizado para HDD rotacional (PASTA_VAULT em /mnt/hdd):
+# acima disso o iostat mostra %util=100% com r/s=w/s=0 (contenção na
+# fila do controlador virtio). Em NVMe esse limite some — pode subir
+# para 6 ou 8. Configurável via env para permitir ajuste sem mudança
+# de código quando o storage for migrado.
+DOWNLOAD_MAX_WORKERS = int(
+    _obter_variavel("DOWNLOAD_MAX_WORKERS", obrigatoria=False, padrao="2")
+)
+
 # ============================================================
 # Limpeza de logs
 # ============================================================
