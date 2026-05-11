@@ -19,6 +19,7 @@ Histórico:
 ============================================================
 """
 
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -71,10 +72,71 @@ from utils.excecoes import (
     ErroDownload,
     ErroUpload,
     ErroExclusaoConta,
+    ErroEspacoInsuficiente,
 )
 from utils.logger import obter_logger
 
 logger = obter_logger("orquestrador")
+
+# Fração do espaço livre em PASTA_VAULT que pode ser usada por um backup.
+# 80% deixa folga para metadados do filesystem, outros backups concorrentes,
+# e o ZIP de saída (que ocupa ~mesmo tamanho dos exports — ZIP_STORED).
+_FRACAO_DISCO_UTILIZAVEL = 0.80
+
+
+def _verificar_capacidade_disco(
+    export_email_resultado: dict,
+    export_drive_resultado: dict,
+    pasta_destino,
+) -> None:
+    """Pre-flight: aborta o backup antes do download se não couber em disco.
+
+    Lê o `stats.sizeInBytes` reportado pelo Vault para cada export
+    (e-mail + Drive) e compara com `disk_usage(pasta_destino).free *
+    _FRACAO_DISCO_UTILIZAVEL`. Se não couber, lança
+    `ErroEspacoInsuficiente` — preserva horas de I/O em downloads
+    que iriam fatalmente falhar e evita resíduos parciais em /mnt/hdd.
+
+    Args:
+        export_email_resultado: dict do Vault com chave `stats.sizeInBytes`.
+        export_drive_resultado: idem.
+        pasta_destino: Path da pasta onde o download vai ser escrito.
+
+    Raises:
+        ErroEspacoInsuficiente: necessário > disco_livre * fração.
+    """
+    tamanho_email = int(export_email_resultado.get("stats", {}).get("sizeInBytes") or 0)
+    tamanho_drive = int(export_drive_resultado.get("stats", {}).get("sizeInBytes") or 0)
+    necessario = tamanho_email + tamanho_drive
+
+    disco_livre = shutil.disk_usage(pasta_destino).free
+    utilizavel = int(disco_livre * _FRACAO_DISCO_UTILIZAVEL)
+
+    necessario_gb = necessario / (1024 ** 3)
+    utilizavel_gb = utilizavel / (1024 ** 3)
+    disco_livre_gb = disco_livre / (1024 ** 3)
+
+    logger.info(
+        f"Pre-flight de capacidade — "
+        f"necessario: {necessario_gb:.2f} GB "
+        f"(email: {tamanho_email / (1024**3):.2f} GB + drive: {tamanho_drive / (1024**3):.2f} GB), "
+        f"disco livre: {disco_livre_gb:.2f} GB, "
+        f"utilizavel ({int(_FRACAO_DISCO_UTILIZAVEL * 100)}%): {utilizavel_gb:.2f} GB"
+    )
+
+    if necessario == 0:
+        # Vault ainda não reportou tamanho — segue e deixa o download decidir.
+        logger.warning("Vault não retornou sizeInBytes — pre-flight inconclusivo, prosseguindo")
+        return
+
+    if necessario > utilizavel:
+        raise ErroEspacoInsuficiente(
+            f"Backup nao cabe no disco: necessario {necessario_gb:.2f} GB, "
+            f"disponivel {disco_livre_gb:.2f} GB (utilizavel {utilizavel_gb:.2f} GB "
+            f"considerando margem de {int((1 - _FRACAO_DISCO_UTILIZAVEL) * 100)}%)",
+            necessario_gb=necessario_gb,
+            disponivel_gb=disco_livre_gb,
+        )
 
 
 def esta_em_processamento(email: str) -> bool:
@@ -263,6 +325,17 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         atualizar_etapa(email, 3, STATUS_CONCLUIDO)
 
         # ─────────────────────────────────────────────────────────
+        # Pre-flight: backup cabe no disco?
+        # ─────────────────────────────────────────────────────────
+        # Validação executada DEPOIS do export concluir (porque só aqui
+        # o Vault tem o sizeInBytes definitivo) e ANTES de iniciar o
+        # download. Aborta cedo se inviável, evitando horas de I/O em
+        # download que vai falhar e resíduos parciais em /mnt/hdd.
+        _verificar_capacidade_disco(
+            export_email_resultado, export_drive_resultado, PASTA_VAULT,
+        )
+
+        # ─────────────────────────────────────────────────────────
         # ETAPA 4: Baixar arquivos exportados
         # ─────────────────────────────────────────────────────────
         logger.info("[ETAPA 4/8] Baixando arquivos exportados...")
@@ -408,6 +481,12 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
             artefatos_total=int(stats.get("totalArtifactCount") or 0),
             tamanho_mb=int(stats.get("sizeInBytes") or 0) / (1024 * 1024),
         )
+
+    except ErroEspacoInsuficiente as erro:
+        # Aborta o backup com mensagem clara — não vale a pena tentar
+        # de novo até alguém expandir o disco ou reduzir o escopo.
+        _tratar_erro(email, ticket_id, nome, str(erro))
+        chat_notificar_erro(email, ticket_id, str(erro), nome)
 
     except ErroDownload as erro:
         _tratar_erro(email, ticket_id, nome, str(erro))

@@ -51,10 +51,76 @@ class TestExcecoes:
         from utils.excecoes import (
             ErroBackup, ErroVaultTimeout, ErroVaultFalha,
             ErroDownload, ErroUpload, ErroExclusaoConta, ErroJira,
+            ErroEspacoInsuficiente, ErroRecuperacaoBloqueada,
         )
         for cls in [ErroVaultTimeout, ErroVaultFalha, ErroDownload,
-                    ErroUpload, ErroExclusaoConta, ErroJira]:
+                    ErroUpload, ErroExclusaoConta, ErroJira,
+                    ErroEspacoInsuficiente, ErroRecuperacaoBloqueada]:
             assert issubclass(cls, ErroBackup)
+
+    def test_erro_espaco_insuficiente_carrega_metricas(self):
+        from utils.excecoes import ErroEspacoInsuficiente
+        erro = ErroEspacoInsuficiente("nao cabe", necessario_gb=1700.0, disponivel_gb=400.0)
+        assert erro.necessario_gb == 1700.0
+        assert erro.disponivel_gb == 400.0
+
+
+class TestVerificarCapacidadeDisco:
+    """Pre-flight: aborta antes do download se backup não couber."""
+
+    def _stats(self, size_bytes: int) -> dict:
+        return {"stats": {"sizeInBytes": size_bytes}}
+
+    def _disk_usage(self, free_bytes: int):
+        from collections import namedtuple
+        Usage = namedtuple("Usage", "total used free")
+        return Usage(total=free_bytes * 2, used=free_bytes, free=free_bytes)
+
+    def test_passa_quando_cabe_com_margem_folgada(self, tmp_path):
+        from processamento.orquestrador import _verificar_capacidade_disco
+
+        export_email = self._stats(10 * 1024 ** 3)  # 10 GB
+        export_drive = self._stats(20 * 1024 ** 3)  # 20 GB
+        # 100 GB livres — 80 GB utilizáveis; 30 GB necessários => OK.
+        with patch("processamento.orquestrador.shutil.disk_usage",
+                   return_value=self._disk_usage(100 * 1024 ** 3)):
+            _verificar_capacidade_disco(export_email, export_drive, tmp_path)
+
+    def test_levanta_excecao_quando_nao_cabe(self, tmp_path):
+        from processamento.orquestrador import _verificar_capacidade_disco
+        from utils.excecoes import ErroEspacoInsuficiente
+
+        # Cenário David Ortiz: 1.77 TB necessário, 400 GB livres.
+        export_email = self._stats(97 * 1024 ** 3)
+        export_drive = self._stats(1668 * 1024 ** 3)
+        with patch("processamento.orquestrador.shutil.disk_usage",
+                   return_value=self._disk_usage(400 * 1024 ** 3)):
+            with pytest.raises(ErroEspacoInsuficiente) as ex:
+                _verificar_capacidade_disco(export_email, export_drive, tmp_path)
+
+        assert ex.value.necessario_gb > 1000
+        assert ex.value.disponivel_gb == pytest.approx(400.0, rel=0.01)
+
+    def test_levanta_no_limite_da_margem(self, tmp_path):
+        """Necessário = 81% do disco → bloqueia (margem é 20%)."""
+        from processamento.orquestrador import _verificar_capacidade_disco
+        from utils.excecoes import ErroEspacoInsuficiente
+
+        export_email = self._stats(0)
+        export_drive = self._stats(int(100 * 1024 ** 3 * 0.81))  # 81 GB de 100 livres
+        with patch("processamento.orquestrador.shutil.disk_usage",
+                   return_value=self._disk_usage(100 * 1024 ** 3)):
+            with pytest.raises(ErroEspacoInsuficiente):
+                _verificar_capacidade_disco(export_email, export_drive, tmp_path)
+
+    def test_segue_quando_size_inconclusivo(self, tmp_path):
+        """Se Vault não reportou sizeInBytes ainda, não bloqueia."""
+        from processamento.orquestrador import _verificar_capacidade_disco
+
+        with patch("processamento.orquestrador.shutil.disk_usage",
+                   return_value=self._disk_usage(10 * 1024 ** 3)):
+            # Ambos sem stats — deve passar sem exceção (pre-flight inconclusivo).
+            _verificar_capacidade_disco({}, {}, tmp_path)
 
 
 class TestIniciarBackupAsync:

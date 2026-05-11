@@ -42,3 +42,26 @@ class ErroExclusaoConta(ErroBackup):
 
 class ErroJira(ErroBackup):
     """Falha na integração com o Jira (comentário, transição ou formulário)."""
+
+
+class ErroEspacoInsuficiente(ErroBackup):
+    """O Vault export é maior do que o espaço livre em PASTA_VAULT.
+
+    Detectado no pre-flight da Etapa 4 (download). Evita iniciar
+    downloads que vão necessariamente falhar por disco cheio,
+    poupando horas de I/O em vão e o resíduo parcial em /mnt/hdd.
+    """
+
+    def __init__(self, mensagem: str, necessario_gb: float = 0, disponivel_gb: float = 0):
+        super().__init__(mensagem)
+        self.necessario_gb = necessario_gb
+        self.disponivel_gb = disponivel_gb
+
+
+class ErroRecuperacaoBloqueada(ErroBackup):
+    """Ticket excedeu o limite de tentativas de recuperação automática.
+
+    Detectado em recuperacao.py: se o ticket já falhou N vezes
+    seguidas, não re-enfileira (evita loop de reprocessamento
+    quando a causa raiz persiste).
+    """

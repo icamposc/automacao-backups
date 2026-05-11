@@ -272,6 +272,22 @@ def obter_por_email(email: str) -> Optional[dict]:
     return _montar_dict(row, etapas.get(row["id"], []))
 
 
+def contar_erros_por_ticket(ticket_id: str) -> int:
+    """Retorna quantos backups com status_geral='erro' existem para este ticket.
+
+    Usado pela recuperação automática para implementar blacklist por
+    ticket: se a quantidade for >= MAX_TENTATIVAS_RECUPERACAO, o ticket
+    não é re-enfileirado (evita loop infinito quando a causa raiz da
+    falha persiste — ex: backup maior que o disco disponível).
+    """
+    conn = obter_conexao()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM backups WHERE ticket_id = ? AND status_geral = 'erro'",
+        (ticket_id,),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 def obter_resumo() -> dict:
     """Retorna contagens por status para o dashboard."""
     conn = obter_conexao()
