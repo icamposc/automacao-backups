@@ -272,6 +272,48 @@ def obter_por_email(email: str) -> Optional[dict]:
     return _montar_dict(row, etapas.get(row["id"], []))
 
 
+def listar_backups_stuck(horas: int = 12) -> list:
+    """Retorna backups marcados 'em_andamento' há mais de `horas` horas.
+
+    Backup que passa do limite indica:
+    - worker travado (D-state, deadlock de FS)
+    - export do Vault enorme (>= 24h é comum em Drives grandes)
+    - bug que deixou registro órfão
+
+    Usado pelo /health para sinalizar status degradado e disparar
+    alerta no monitoramento externo. Não toca no banco — apenas lê.
+
+    Returns:
+        Lista de dicts com email, ticket_id, inicio, idade_horas
+        (todos os em_andamento com `inicio` > `horas` atrás).
+    """
+    from datetime import timedelta
+    conn = obter_conexao()
+    limite = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
+    rows = conn.execute(
+        """SELECT email, ticket_id, inicio
+           FROM backups
+           WHERE status_geral = 'em_andamento' AND inicio < ?
+           ORDER BY inicio ASC""",
+        (limite,),
+    ).fetchall()
+    agora = datetime.now(timezone.utc)
+    resultado = []
+    for r in rows:
+        try:
+            inicio_dt = datetime.fromisoformat(r["inicio"])
+            idade = (agora - inicio_dt).total_seconds() / 3600.0
+        except (TypeError, ValueError):
+            idade = 0.0
+        resultado.append({
+            "email":       r["email"],
+            "ticket_id":   r["ticket_id"],
+            "inicio":      r["inicio"],
+            "idade_horas": round(idade, 1),
+        })
+    return resultado
+
+
 def contar_erros_por_ticket(ticket_id: str) -> int:
     """Retorna quantos backups com status_geral='erro' existem para este ticket.
 

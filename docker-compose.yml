@@ -78,6 +78,17 @@ services:
         --log-level info
         app.servidor:app
 
+    # /health retorna 503 quando algum componente está degradado,
+    # incluindo worker Celery em D-state (inspect ping sem resposta)
+    # e disco em PASTA_VAULT abaixo do limite. start_period generoso
+    # cobre a recuperacao de backups interrompidos no startup.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # ─── Worker (Celery) ─────────────────────────────────────
   worker:
     build: .
@@ -110,6 +121,18 @@ services:
         --queues=celery
         --hostname=worker@%h
         --logfile=/app/logs/celery_worker.log
+
+    # 'inspect ping' falha quando o worker esta travado em D-state
+    # (deadlock de FS, jbd2, etc.) mesmo com o processo de pe. Com
+    # o pool=threads, o thread principal continua respondendo enquanto
+    # threads de tarefa estao bloqueadas no I/O, entao precisamos do
+    # ping para detectar o problema real.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping --timeout 5 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 # ─── Rede interna ─────────────────────────────────────────
 networks:
