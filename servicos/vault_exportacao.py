@@ -636,8 +636,11 @@ def baixar_exportacao(
                         f"após {MAX_TENTATIVAS} tentativas: {erro}"
                     )
 
-    # Paraleliza o download com até 6 threads simultâneas
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    # Paraleliza com 2 threads — o destino é HDD rotacional (/mnt/hdd).
+    # Acima de 2 threads o iostat mostra %util=100% com r/s=w/s=0
+    # (contenção na fila do controlador virtio). Histórico: travamento
+    # do backup do David Ortiz em 08/05/2026 com max_workers=6.
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futuros = {executor.submit(_baixar_arquivo, info): info for info in arquivos_info}
         for futuro in as_completed(futuros):
             resultado = futuro.result()

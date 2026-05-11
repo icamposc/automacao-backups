@@ -155,8 +155,15 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
     pasta_colaborador = PASTA_VAULT / f"{email}_{timestamp}"
     pasta_colaborador.mkdir(parents=True, exist_ok=True)
 
+    # ZIP em pasta irmã (não filha) para não dobrar o pico de uso de disco:
+    # se ficasse dentro de pasta_colaborador, durante a compactação teríamos
+    # os exports brutos + o ZIP final no mesmo volume sem chance de liberar
+    # nada até o upload terminar. Pasta irmã permite limpar a pasta dos
+    # exports assim que o ZIP fecha.
     nome_zip = f"{email}.zip"
-    caminho_zip = pasta_colaborador / nome_zip  # ZIP dentro da pasta com timestamp — evita colisão entre execuções paralelas
+    pasta_zips = PASTA_VAULT / "zips"
+    pasta_zips.mkdir(parents=True, exist_ok=True)
+    caminho_zip = pasta_zips / f"{email}_{timestamp}.zip"
     link_drive = None
     sha256_zip = None
     _backup_concluido = False
@@ -313,7 +320,11 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         atualizar_etapa(email, 5, STATUS_EM_ANDAMENTO)
         comentar_progresso(ticket_id, "Compactando arquivos em ZIP...")
 
-        caminho_zip, sha256_zip = compactar_arquivos(pasta_colaborador, caminho_zip)
+        caminho_zip, sha256_zip = compactar_arquivos(
+            pasta_colaborador,
+            caminho_zip,
+            on_progresso=lambda pct: atualizar_progresso(email, 5, pct),
+        )
         logger.info(f"Integridade ZIP — SHA256: {sha256_zip}")
         atualizar_etapa(email, 5, STATUS_CONCLUIDO)
 

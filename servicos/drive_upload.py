@@ -106,6 +106,7 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
                 f"?uploadType=resumable&supportsAllDrives=true&fields=id,name,webViewLink",
                 headers=headers_inicio,
                 data=json.dumps(metadados),
+                timeout=(30, 60),  # (connect, read) — POST inicial é pequeno
             )
             resposta_inicio.raise_for_status()
             url_upload = resposta_inicio.headers.get("Location")
@@ -120,6 +121,11 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
             chunk_size = 10 * 1024 * 1024  # 10 MB
             enviado = 0
 
+            # Throttle do callback/log de progresso: chunks de 10 MB em ZIPs
+            # grandes geram milhares de chamadas se logarmos a cada um.
+            ultimo_pct_logado = -1
+            ultimo_ts_emit = 0.0
+
             with open(caminho_arquivo, "rb") as arquivo:
                 while enviado < tamanho_total:
                     chunk = arquivo.read(chunk_size)
@@ -128,7 +134,15 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
                         "Content-Range": f"bytes {enviado}-{fim}/{tamanho_total}",
                         "Content-Type": "application/zip",
                     }
-                    resp_chunk = sessao.put(url_upload, headers=headers_chunk, data=chunk)
+                    # timeout=(connect, read) — read longo porque chunks de 10 MB
+                    # em conexões saturadas demoram; sem timeout, um socket morto
+                    # bloqueia o thread indefinidamente.
+                    resp_chunk = sessao.put(
+                        url_upload,
+                        headers=headers_chunk,
+                        data=chunk,
+                        timeout=(60, 600),
+                    )
 
                     if resp_chunk.status_code in (200, 201):
                         # Upload concluído
@@ -138,12 +152,16 @@ def fazer_upload(caminho_arquivo: Path, nome_arquivo: str = None, sha256: str = 
                         # Chunk aceito, continua
                         enviado += len(chunk)
                         progresso = int((enviado / tamanho_total) * 100)
-                        logger.info(f"Progresso do upload: {progresso}%")
-                        if on_progresso:
-                            try:
-                                on_progresso(progresso)
-                            except Exception:
-                                pass  # progresso é informativo — nunca deve interromper o upload
+                        agora = time.monotonic()
+                        if progresso > ultimo_pct_logado or (agora - ultimo_ts_emit) >= 30.0:
+                            logger.debug(f"Progresso do upload: {progresso}%")
+                            ultimo_pct_logado = progresso
+                            ultimo_ts_emit = agora
+                            if on_progresso:
+                                try:
+                                    on_progresso(progresso)
+                                except Exception:
+                                    pass  # progresso é informativo — nunca interrompe o upload
                     else:
                         logger.error(
                             f"Resposta inesperada do Drive ({resp_chunk.status_code}): "

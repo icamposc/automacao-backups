@@ -273,14 +273,16 @@ class TestCompactacaoPasseUnico:
         tempo_novo = time.perf_counter() - inicio
 
         # ── Duplo passe (simula abordagem antiga) ─────────────────────────
-        import shutil
-
+        # Usa ZIP_STORED como a implementação atual para isolar a variável
+        # em teste (rglob+sum extra). Comparar contra ZIP_DEFLATED daria
+        # vantagem artificial ao duplo passe em dados sintéticos repetitivos
+        # — irrelevante para o cenário real (PST/ZIP do Vault são incompressíveis).
         inicio = time.perf_counter()
         arquivos_duplo = list(pasta.rglob("*"))
         arquivos_duplo = [a for a in arquivos_duplo if a.is_file()]
         _tamanho = sum(a.stat().st_size for a in arquivos_duplo)  # passe extra
         zip_duplo = tmp_path / "duplo.zip"
-        with zipfile.ZipFile(zip_duplo, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_duplo, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
             for arq in arquivos_duplo:
                 zf.write(arq, arq.relative_to(pasta))
         tempo_duplo = time.perf_counter() - inicio
