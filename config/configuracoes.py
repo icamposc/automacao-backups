@@ -115,9 +115,17 @@ SERVIDOR_PORTA = int(_obter_variavel("SERVIDOR_PORTA", obrigatoria=False, padrao
 SERVIDOR_HOST = _obter_variavel("SERVIDOR_HOST", obrigatoria=False, padrao="0.0.0.0")
 
 # ============================================================
-# Google Chat — Webhook para notificações
+# Google Chat — Webhooks para notificações
 # ============================================================
+# Chat principal — fluxo operacional (início, progresso, sucesso, conta excluída).
 GOOGLE_CHAT_WEBHOOK_URL = _obter_variavel("GOOGLE_CHAT_WEBHOOK_URL", obrigatoria=False, padrao="")
+
+# Chat de LOGS — erros técnicos, falhas, bloqueios e alertas de saúde do sistema.
+# Aponta para o grupo "LOG - Automação Backups". Se ficar vazio, esses alertas
+# usam o webhook principal como fallback (preserva visibilidade).
+GOOGLE_CHAT_WEBHOOK_URL_LOGS = _obter_variavel(
+    "GOOGLE_CHAT_WEBHOOK_URL_LOGS", obrigatoria=False, padrao=""
+)
 
 # ============================================================
 # Limites de processamento

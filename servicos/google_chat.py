@@ -26,7 +26,7 @@ Histórico:
 
 import requests
 
-from config.configuracoes import GOOGLE_CHAT_WEBHOOK_URL
+from config.configuracoes import GOOGLE_CHAT_WEBHOOK_URL, GOOGLE_CHAT_WEBHOOK_URL_LOGS
 from utils.logger import obter_logger
 
 logger = obter_logger("google_chat")
@@ -34,52 +34,72 @@ logger = obter_logger("google_chat")
 # Timeout para requisições ao Google Chat (segundos)
 _TIMEOUT = 15
 
+# Destinos suportados
+DESTINO_PRINCIPAL = "principal"  # fluxo operacional (início, progresso, sucesso)
+DESTINO_LOGS = "logs"            # erros técnicos, falhas e alertas de saúde
 
-def _enviar_mensagem(texto: str) -> bool:
+
+def _resolver_webhook(destino: str) -> str:
+    """
+    Resolve qual URL de webhook usar conforme o destino lógico.
+
+    Para `destino='logs'`, usa GOOGLE_CHAT_WEBHOOK_URL_LOGS. Se essa estiver
+    vazia, faz fallback para o webhook principal — assim alertas críticos
+    nunca somem silenciosamente por falta de configuração.
+
+    Retorna string vazia se nenhuma URL estiver configurada (notificação é ignorada).
+    """
+    if destino == DESTINO_LOGS:
+        return GOOGLE_CHAT_WEBHOOK_URL_LOGS or GOOGLE_CHAT_WEBHOOK_URL
+    return GOOGLE_CHAT_WEBHOOK_URL
+
+
+def _enviar_mensagem(texto: str, destino: str = DESTINO_PRINCIPAL) -> bool:
     """
     Envia uma mensagem de texto para o Google Chat via webhook.
 
     Args:
-        texto: Mensagem a ser enviada (suporta formatação simples do Chat)
+        texto:   Mensagem a ser enviada (suporta formatação simples do Chat)
+        destino: 'principal' (operacional) ou 'logs' (erros/alertas)
 
     Returns:
         True se a mensagem foi enviada com sucesso, False caso contrário
     """
-    if not GOOGLE_CHAT_WEBHOOK_URL:
-        logger.debug("Webhook do Google Chat não configurado — notificação ignorada")
+    webhook = _resolver_webhook(destino)
+    if not webhook:
+        logger.debug(f"Webhook do Google Chat ({destino}) não configurado — notificação ignorada")
         return False
 
     corpo = {"text": texto}
 
     try:
-        resposta = requests.post(
-            GOOGLE_CHAT_WEBHOOK_URL,
-            json=corpo,
-            timeout=_TIMEOUT,
-        )
+        resposta = requests.post(webhook, json=corpo, timeout=_TIMEOUT)
         resposta.raise_for_status()
-        logger.debug("Mensagem enviada ao Google Chat com sucesso")
+        logger.debug(f"Mensagem enviada ao Google Chat ({destino}) com sucesso")
         return True
 
     except requests.exceptions.RequestException as erro:
-        logger.error(f"Erro ao enviar mensagem para o Google Chat: {erro}")
+        logger.error(f"Erro ao enviar mensagem para o Google Chat ({destino}): {erro}")
         return False
 
 
-def _enviar_card(titulo: str, subtitulo: str, secoes: list) -> bool:
+def _enviar_card(titulo: str, subtitulo: str, secoes: list,
+                 destino: str = DESTINO_PRINCIPAL) -> bool:
     """
     Envia uma mensagem com card formatado para o Google Chat.
 
     Args:
-        titulo: Título do card
+        titulo:    Título do card
         subtitulo: Subtítulo do card
-        secoes: Lista de seções com widgets
+        secoes:    Lista de seções com widgets
+        destino:   'principal' (operacional) ou 'logs' (erros/alertas)
 
     Returns:
         True se o card foi enviado com sucesso
     """
-    if not GOOGLE_CHAT_WEBHOOK_URL:
-        logger.debug("Webhook do Google Chat não configurado — notificação ignorada")
+    webhook = _resolver_webhook(destino)
+    if not webhook:
+        logger.debug(f"Webhook do Google Chat ({destino}) não configurado — notificação ignorada")
         return False
 
     corpo = {
@@ -98,17 +118,13 @@ def _enviar_card(titulo: str, subtitulo: str, secoes: list) -> bool:
     }
 
     try:
-        resposta = requests.post(
-            GOOGLE_CHAT_WEBHOOK_URL,
-            json=corpo,
-            timeout=_TIMEOUT,
-        )
+        resposta = requests.post(webhook, json=corpo, timeout=_TIMEOUT)
         resposta.raise_for_status()
-        logger.debug("Card enviado ao Google Chat com sucesso")
+        logger.debug(f"Card enviado ao Google Chat ({destino}) com sucesso")
         return True
 
     except requests.exceptions.RequestException as erro:
-        logger.error(f"Erro ao enviar card para o Google Chat: {erro}")
+        logger.error(f"Erro ao enviar card para o Google Chat ({destino}): {erro}")
         return False
 
 
@@ -174,7 +190,7 @@ def notificar_sucesso(email: str, ticket_id: str, link_drive: str,
 
 def notificar_erro(email: str, ticket_id: str, descricao_erro: str,
                    nome: str = None) -> bool:
-    """Notifica o Google Chat que houve erro no backup."""
+    """Notifica o Google Chat de LOGS que houve erro no backup."""
     identificador = nome or email
     return _enviar_card(
         titulo="❌ Erro no Backup",
@@ -194,6 +210,7 @@ def notificar_erro(email: str, ticket_id: str, descricao_erro: str,
                 ]
             }
         ],
+        destino=DESTINO_LOGS,
     )
 
 
@@ -314,6 +331,7 @@ def notificar_erro_vault_timeout(
         titulo="⏱️ Timeout no Google Vault",
         subtitulo=f"Colaborador: {identificador}",
         secoes=[{"widgets": widgets}],
+        destino=DESTINO_LOGS,
     )
 
 
@@ -336,6 +354,7 @@ def notificar_erro_download(
                                    "text": "Verificar conectividade com o Cloud Storage e reprocessar o ticket"}},
             ]
         }],
+        destino=DESTINO_LOGS,
     )
 
 
@@ -358,6 +377,7 @@ def notificar_erro_upload(
                                    "text": "Verificar espaço no Drive Compartilhado e reprocessar o ticket"}},
             ]
         }],
+        destino=DESTINO_LOGS,
     )
 
 
@@ -382,6 +402,7 @@ def notificar_erro_exclusao_conta(
         titulo="🗑️ Erro ao Excluir Conta",
         subtitulo=f"Colaborador: {identificador}",
         secoes=[{"widgets": widgets}],
+        destino=DESTINO_LOGS,
     )
 
 
@@ -402,6 +423,78 @@ def notificar_erro_jira(
                                    "text": "Atualizar o ticket manualmente. O backup pode estar completo."}},
             ]
         }],
+        destino=DESTINO_LOGS,
+    )
+
+
+def notificar_saude_degradada(componentes_problema: dict, detalhes_disco: dict = None,
+                              nivel: str = "warning") -> bool:
+    """
+    Alerta no Chat de LOGS que o sistema entrou em estado degradado.
+
+    Args:
+        componentes_problema: dict {nome_componente: descricao_do_problema}
+                              ex: {"redis": "indisponivel: ConnectionError",
+                                   "celery": "sem_workers"}
+        detalhes_disco:       dict opcional com {livre_gb, livre_pct, total_gb}
+                              quando o disco está abaixo do threshold
+        nivel:                'critical' (Redis/banco fora, disco < 5%, backups stuck)
+                              ou 'warning' (problemas relevantes mas não bloqueantes)
+    """
+    if nivel == "critical":
+        titulo = "🚨 CRITICAL — Sistema Indisponível"
+        subtitulo = "Intervenção urgente necessária"
+        acao = "Intervir imediatamente — verificar /health, Redis, worker e disco"
+    else:
+        titulo = "⚠️ WARNING — Atenção Necessária"
+        subtitulo = "Sistema em estado degradado mas operacional"
+        acao = "Acompanhar — verificar /health quando possível"
+
+    widgets = []
+    for componente, descricao in componentes_problema.items():
+        widgets.append({
+            "decoratedText": {
+                "topLabel": componente.upper(),
+                "text": descricao,
+            }
+        })
+    if detalhes_disco:
+        widgets.append({
+            "decoratedText": {
+                "topLabel": "Disco — espaço livre",
+                "text": (
+                    f"{detalhes_disco.get('livre_gb', 0)} GB "
+                    f"({detalhes_disco.get('livre_pct', 0)}%) "
+                    f"de {detalhes_disco.get('total_gb', 0)} GB"
+                ),
+            }
+        })
+    widgets.append({
+        "decoratedText": {"topLabel": "Ação Necessária", "text": acao}
+    })
+
+    return _enviar_card(
+        titulo=titulo,
+        subtitulo=subtitulo,
+        secoes=[{"widgets": widgets}],
+        destino=DESTINO_LOGS,
+    )
+
+
+def notificar_saude_recuperada(componentes_anteriores: list) -> bool:
+    """Alerta no Chat de LOGS que o sistema voltou ao normal após estar degradado."""
+    return _enviar_card(
+        titulo="✅ Sistema Recuperado",
+        subtitulo="Todos os componentes voltaram ao normal",
+        secoes=[{
+            "widgets": [
+                {"decoratedText": {
+                    "topLabel": "Componentes que estavam com problema",
+                    "text": ", ".join(componentes_anteriores) or "—",
+                }},
+            ]
+        }],
+        destino=DESTINO_LOGS,
     )
 
 

@@ -18,7 +18,6 @@ Histórico:
 """
 
 import threading
-from datetime import datetime
 
 from flask import Flask, request, jsonify
 
@@ -29,6 +28,7 @@ from dados.repositorio_backups import existe_backup_concluido_por_ticket
 from processamento.limpeza import limpar_logs_antigos
 from dados.banco import inicializar_banco
 from processamento.recuperacao import recuperar_backups_interrompidos
+from processamento.saude import coletar_status_saude, iniciar_monitor_saude
 from utils.logger import obter_logger
 
 logger = obter_logger("servidor")
@@ -49,6 +49,10 @@ recuperar_backups_interrompidos()
 
 # limpeza de logs pode demorar — executa em background para não atrasar o startup
 threading.Thread(target=limpar_logs_antigos, daemon=True).start()
+
+# Monitor de saúde — thread daemon que alerta no Google Chat de LOGS quando
+# o sistema entra/sai do estado degradado (componentes, disco, backups stuck).
+iniciar_monitor_saude()
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])
@@ -112,17 +116,6 @@ def receber_webhook():
         return jsonify({"erro": "Erro interno do servidor"}), 500
 
 
-# Threshold para considerar o disco em estado degradado.
-# /mnt/hdd é o volume crítico — abaixo de 20% livres, qualquer backup
-# grande novo arrisca encher o disco e travar o sistema.
-_DISCO_MIN_LIVRE_PCT = 20
-
-# Limite acima do qual um backup em_andamento é considerado "stuck"
-# (worker travado, D-state, deadlock de FS, ou export do Vault muito
-# grande). Acima dele, /health entra em "degradado".
-_STUCK_HORAS = 12
-
-
 @app.route("/saude", methods=["GET"])
 def health_check_simples():
     """Alias legado para /health. Mantido para ferramentas externas que
@@ -137,121 +130,17 @@ def health_check():
     """
     Health check detalhado com status de todos os componentes.
 
-    Resposta inclui:
-    - banco SQLite (read query)
-    - Redis (ping)
-    - Celery (inspect ping com timeout 5s — detecta worker em D-state)
-    - disco em PASTA_VAULT (% livre, alerta abaixo do threshold)
-    - backups travados (status='em_andamento' há mais de _STUCK_HORAS horas)
-    - última execução
+    Delega para `processamento.saude.coletar_status_saude`, que é o mesmo
+    coletor usado pelo monitor periódico — garante que /health e os
+    alertas de Chat de LOGS observem o estado por uma única fonte da verdade.
 
     Status HTTP:
-    - 200 quando tudo está ok
-    - 503 quando qualquer componente está degradado ou indisponível
-      (essencial para healthcheck do Docker considerar o container unhealthy)
+    - 200 quando status_geral == "ok"
+    - 503 quando degradado (essencial para o healthcheck do Docker)
     """
-    import shutil
-    from processamento.rastreador import obter_resumo, obter_historico
-    from dados.repositorio_backups import listar_backups_stuck
-    from config.configuracoes import REDIS_URL, PASTA_VAULT
-
-    componentes = {
-        "servidor": "ok",
-        "banco":    "desconhecido",
-        "redis":    "desconhecido",
-        "celery":   "desconhecido",
-        "disco":    "desconhecido",
-    }
-    status_geral = "ok"
-
-    # ── Banco ──────────────────────────────────────────────────────────
-    try:
-        resumo = obter_resumo()
-        componentes["banco"] = "ok"
-    except Exception as erro:
-        componentes["banco"] = f"erro: {erro}"
-        resumo = {"ativos": 0, "total_finalizados": 0, "sucessos": 0, "erros": 0}
-        status_geral = "degradado"
-
-    # ── Redis (broker do Celery) ───────────────────────────────────────
-    try:
-        import redis
-        r = redis.from_url(REDIS_URL, socket_connect_timeout=2)
-        r.ping()
-        componentes["redis"] = "ok"
-    except Exception as erro:
-        componentes["redis"] = f"indisponivel: {erro}"
-        status_geral = "degradado"
-
-    # ── Celery (worker responde a inspect ping?) ───────────────────────
-    # Diferencia "Redis up mas worker travado em D-state" de "tudo bem".
-    # O ping volta um dict {hostname: {ok: pong}} por worker ativo.
-    try:
-        from worker.celery_app import app as celery_app
-        pongs = celery_app.control.inspect(timeout=5).ping()
-        if pongs:
-            componentes["celery"] = f"ok ({len(pongs)} worker(s))"
-        else:
-            componentes["celery"] = "sem_workers"
-            status_geral = "degradado"
-    except Exception as erro:
-        componentes["celery"] = f"erro: {erro}"
-        status_geral = "degradado"
-
-    # ── Disco em PASTA_VAULT ───────────────────────────────────────────
-    try:
-        uso = shutil.disk_usage(PASTA_VAULT)
-        livre_pct = (uso.free / uso.total * 100) if uso.total else 0
-        disco_info = {
-            "total_gb": round(uso.total / (1024 ** 3), 2),
-            "livre_gb": round(uso.free / (1024 ** 3), 2),
-            "livre_pct": round(livre_pct, 1),
-        }
-        if livre_pct < _DISCO_MIN_LIVRE_PCT:
-            componentes["disco"] = f"degradado: {livre_pct:.1f}% livre"
-            status_geral = "degradado"
-        else:
-            componentes["disco"] = "ok"
-        componentes["disco_detalhe"] = disco_info
-    except Exception as erro:
-        componentes["disco"] = f"erro: {erro}"
-        status_geral = "degradado"
-
-    # ── Backups stuck (em_andamento há > N horas) ──────────────────────
-    stuck = []
-    try:
-        stuck = listar_backups_stuck(horas=_STUCK_HORAS)
-        if stuck:
-            status_geral = "degradado"
-    except Exception as erro:
-        logger.warning(f"Falha ao listar backups stuck: {erro}")
-
-    # ── Última execução ────────────────────────────────────────────────
-    ultima = None
-    try:
-        historico = obter_historico(por_pagina=1)
-        if historico:
-            ultimo = historico[0]
-            ultima = {
-                "email":  ultimo.get("email"),
-                "status": ultimo.get("status_geral"),
-                "fim":    ultimo.get("fim"),
-            }
-    except Exception:
-        pass
-
+    status_geral, payload = coletar_status_saude()
     http_status = 200 if status_geral == "ok" else 503
-
-    return jsonify({
-        "status":               status_geral,
-        "versao":               "2.0.0",
-        "timestamp":            datetime.now().isoformat(),
-        "componentes":          componentes,
-        "backups_em_andamento": resumo.get("ativos", 0),
-        "backups_stuck":        stuck,
-        "resumo":               resumo,
-        "ultima_execucao":      ultima,
-    }), http_status
+    return jsonify(payload), http_status
 
 
 @app.route("/", methods=["GET"])
@@ -267,6 +156,9 @@ def raiz():
             "api_ativos":  "GET /api/backups/ativos",
             "api_historico": "GET /api/backups/historico",
             "api_resumo":  "GET /api/backups/resumo",
+            "api_lote":    "POST /api/backups/lote",
+            "api_lote_template": "GET /api/backups/lote/template",
+            "api_fila":    "GET /api/backups/fila",
         },
     }), 200
 

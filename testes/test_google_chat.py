@@ -17,7 +17,10 @@ WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/TEST/messages?key=key&token
 
 @pytest.fixture(autouse=True)
 def configurar_webhook(mocker):
+    # Mocka os dois webhooks (principal e LOGS) para a mesma URL de teste —
+    # assim notificar_erro_* (que vai para LOGS) também é capturado pelo `responses`.
     mocker.patch("servicos.google_chat.GOOGLE_CHAT_WEBHOOK_URL", WEBHOOK_URL)
+    mocker.patch("servicos.google_chat.GOOGLE_CHAT_WEBHOOK_URL_LOGS", WEBHOOK_URL)
 
 
 def _decodificar_body(body) -> str:

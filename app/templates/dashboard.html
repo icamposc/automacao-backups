@@ -440,6 +440,100 @@
             color: var(--cor-erro);
         }
 
+        /* Painel de upload CSV (backup em massa) */
+        .form-lote {
+            display: grid;
+            grid-template-columns: 2fr 1fr auto;
+            gap: 0.75rem;
+            align-items: end;
+        }
+
+        .campo-arquivo input[type="file"] {
+            background: var(--cor-fundo);
+            border: 1px dashed var(--cor-borda);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            color: var(--cor-texto);
+            font-size: 0.825rem;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .campo-arquivo input[type="file"]::file-selector-button {
+            background: var(--cor-borda);
+            color: var(--cor-texto);
+            border: none;
+            border-radius: 6px;
+            padding: 0.35rem 0.75rem;
+            margin-right: 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .dica-lote {
+            font-size: 0.72rem;
+            color: var(--cor-texto-suave);
+            margin-top: 0.5rem;
+            line-height: 1.4;
+        }
+
+        .dica-lote code {
+            background: var(--cor-fundo);
+            padding: 0.05rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+        }
+
+        .link-template {
+            display: inline-flex;
+            align-items: center;
+            margin-top: 0.4rem;
+            color: var(--cor-primaria);
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+
+        .link-template:hover {
+            color: #60a5fa;
+            text-decoration: underline;
+        }
+
+        .resumo-lote {
+            margin-top: 0.875rem;
+            padding: 0.75rem 0.875rem;
+            background: var(--cor-fundo);
+            border: 1px solid var(--cor-borda);
+            border-radius: 8px;
+            display: none;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+
+        .resumo-lote .linha-resumo { display: flex; gap: 0.5rem; align-items: center; }
+        .resumo-lote .pill {
+            display: inline-block;
+            padding: 0.1rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .resumo-lote .pill.ok    { background: rgba(34, 197, 94, 0.15);  color: var(--cor-sucesso); }
+        .resumo-lote .pill.skip  { background: rgba(245, 158, 11, 0.15); color: var(--cor-aviso); }
+        .resumo-lote .pill.erro  { background: rgba(239, 68, 68, 0.15);  color: var(--cor-erro); }
+        .resumo-lote details summary {
+            cursor: pointer;
+            color: var(--cor-texto-suave);
+            font-size: 0.75rem;
+            margin-top: 0.35rem;
+        }
+        .resumo-lote details ul {
+            margin: 0.35rem 0 0 1.25rem;
+            color: var(--cor-texto-suave);
+            font-size: 0.75rem;
+        }
+
         /* Cabeçalho da seção com botão de ação */
         .secao-cabecalho {
             display: flex;
@@ -503,7 +597,8 @@
 
         /* Responsividade */
         @media (max-width: 768px) {
-            .form-manual {
+            .form-manual,
+            .form-lote {
                 grid-template-columns: 1fr;
             }
         }
@@ -568,8 +663,48 @@
             <div class="feedback-manual" id="feedback-manual"></div>
         </section>
 
+        <!-- Backup em Massa (CSV) -->
+        <section class="painel-manual">
+            <h2>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Backup em Massa (CSV)
+            </h2>
+            <div class="form-lote">
+                <div class="campo-grupo campo-arquivo">
+                    <label for="inp-arquivo-lote">Arquivo .csv com lista de e-mails *</label>
+                    <input type="file" id="inp-arquivo-lote" accept=".csv,text/csv" />
+                </div>
+                <div class="campo-toggle">
+                    <input type="checkbox" id="inp-deletar-conta-lote" checked />
+                    <label for="inp-deletar-conta-lote">Deletar conta após backup</label>
+                </div>
+                <button class="btn-iniciar" id="btn-iniciar-lote" onclick="iniciarBackupLote()">
+                    Enviar Lote
+                </button>
+            </div>
+            <div class="dica-lote">
+                Formatos aceitos: CSV com cabeçalho <code>email</code> ou uma única coluna sem cabeçalho (um e-mail por linha).
+                <strong>Limite de 50 e-mails por upload</strong> — para volumes maiores, divida em arquivos menores e envie em sequência (todos serão enfileirados na ordem).
+                A opção de deletar conta é aplicada a todos os e-mails do lote.
+                <br>
+                <a class="link-template" href="/api/backups/lote/template" download>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 0.25rem;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Baixar template de exemplo (.csv)
+                </a>
+            </div>
+            <div class="resumo-lote" id="resumo-lote"></div>
+        </section>
+
         <!-- Resumo -->
         <section class="resumo" id="resumo">
+            <div class="card-resumo">
+                <div class="rotulo">Em Execução</div>
+                <div class="valor ativos" id="resumo-execucao">0 / 4</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Aguardando na Fila</div>
+                <div class="valor" id="resumo-aguardando">0</div>
+            </div>
             <div class="card-resumo">
                 <div class="rotulo">Em Andamento</div>
                 <div class="valor ativos" id="resumo-ativos">0</div>
@@ -734,17 +869,22 @@
          */
         async function atualizarDashboard() {
             try {
-                const [resResumo, resAtivos, resHistorico] = await Promise.all([
+                const [resResumo, resAtivos, resHistorico, resFila] = await Promise.all([
                     fetch('/api/backups/resumo'),
                     fetch('/api/backups/ativos'),
                     fetch('/api/backups/historico'),
+                    fetch('/api/backups/fila'),
                 ]);
 
                 const resumo = await resResumo.json();
                 const ativos = await resAtivos.json();
                 const historico = await resHistorico.json();
+                const fila = await resFila.json();
 
                 // Atualizar resumo
+                document.getElementById('resumo-execucao').textContent =
+                    `${fila.ativos} / ${fila.limite_paralelo}`;
+                document.getElementById('resumo-aguardando').textContent = fila.aguardando;
                 document.getElementById('resumo-ativos').textContent = resumo.ativos;
                 document.getElementById('resumo-sucessos').textContent = resumo.sucessos;
                 document.getElementById('resumo-erros').textContent = resumo.erros;
@@ -988,6 +1128,116 @@
             el.className = `feedback-manual ${tipo}`;
             el.style.display = 'block';
             setTimeout(() => { el.style.display = 'none'; }, 8000);
+        }
+
+        /**
+         * Faz upload do arquivo CSV de backup em massa
+         */
+        async function iniciarBackupLote() {
+            const inputArquivo = document.getElementById('inp-arquivo-lote');
+            const deletarConta = document.getElementById('inp-deletar-conta-lote').checked;
+            const btn          = document.getElementById('btn-iniciar-lote');
+            const boxResumo    = document.getElementById('resumo-lote');
+
+            const arquivo = inputArquivo.files[0];
+            if (!arquivo) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Selecione um arquivo .csv antes de enviar.</span>';
+                return;
+            }
+            if (!arquivo.name.toLowerCase().endsWith('.csv')) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Apenas arquivos .csv são aceitos.</span>';
+                return;
+            }
+
+            // Pré-validação local — evita upload se passar do limite por lote
+            const LIMITE_LOTE = 50;
+            try {
+                const texto  = await arquivo.text();
+                const linhas = texto.split(/\r?\n/)
+                    .map(l => l.trim())
+                    .filter(l => l && !l.startsWith('#'));
+                const temCabecalho = /(^|,)\s*email\s*(,|$)/i.test(linhas[0] || '');
+                const totalLocal   = Math.max(0, linhas.length - (temCabecalho ? 1 : 0));
+                if (totalLocal > LIMITE_LOTE) {
+                    boxResumo.style.display = 'block';
+                    boxResumo.innerHTML =
+                        `<span style="color: var(--cor-erro);">O arquivo contém ${totalLocal} e-mails. ` +
+                        `O limite por upload é de ${LIMITE_LOTE}. Divida em arquivos menores e envie em sequência ` +
+                        `— todos os backups serão enfileirados na ordem.</span>`;
+                    return;
+                }
+            } catch (e) {
+                // Falha na leitura local não bloqueia — backend faz a validação canônica
+            }
+
+            const confirmacao = confirm(
+                `Confirma o envio do lote?\n\n` +
+                `Arquivo: ${arquivo.name}\n` +
+                `Deletar conta após backup: ${deletarConta ? 'SIM' : 'NÃO'}\n\n` +
+                `Cada e-mail válido será enfileirado imediatamente.`
+            );
+            if (!confirmacao) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Enviando...';
+            boxResumo.style.display = 'none';
+            boxResumo.innerHTML = '';
+
+            const fd = new FormData();
+            fd.append('arquivo', arquivo);
+            fd.append('deletar_conta', deletarConta ? 'true' : 'false');
+
+            try {
+                const resp  = await fetch('/api/backups/lote', { method: 'POST', body: fd });
+                const dados = await resp.json();
+
+                if (!resp.ok) {
+                    boxResumo.style.display = 'block';
+                    boxResumo.innerHTML = `<span style="color: var(--cor-erro);">${dados.erro || 'Erro ao processar o arquivo.'}</span>`;
+                    return;
+                }
+
+                const aceitos    = dados.aceitos || [];
+                const emAndamento = dados.ja_em_processamento || [];
+                const invalidos  = dados.invalidos || [];
+
+                const listaInvalidos = invalidos.length
+                    ? `<details><summary>Ver ${invalidos.length} inválido(s)</summary>
+                         <ul>${invalidos.map(e => `<li>${e}</li>`).join('')}</ul>
+                       </details>`
+                    : '';
+                const listaEmAndamento = emAndamento.length
+                    ? `<details><summary>Ver ${emAndamento.length} já em processamento</summary>
+                         <ul>${emAndamento.map(e => `<li>${e}</li>`).join('')}</ul>
+                       </details>`
+                    : '';
+
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = `
+                    <div class="linha-resumo">
+                        <strong>Lote processado:</strong>
+                        <span class="pill ok">${aceitos.length} aceito(s)</span>
+                        <span class="pill skip">${emAndamento.length} em processamento</span>
+                        <span class="pill erro">${invalidos.length} inválido(s)</span>
+                        <span style="color: var(--cor-texto-suave); margin-left: auto;">
+                            Total no arquivo: ${dados.total_linhas} · Deletar conta: ${dados.deletar_conta ? 'SIM' : 'NÃO'}
+                        </span>
+                    </div>
+                    ${listaEmAndamento}
+                    ${listaInvalidos}
+                `;
+
+                inputArquivo.value = '';
+                atualizarDashboard();
+            } catch (e) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Falha de comunicação com o servidor.</span>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enviar Lote';
+            }
         }
 
         // Enter no campo de e-mail também dispara

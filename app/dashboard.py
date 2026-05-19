@@ -21,10 +21,12 @@ Histórico:
 ============================================================
 """
 
+import csv
+import io
 import re
 from datetime import datetime
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, Response, jsonify, render_template, request
 
 from processamento.rastreador import (
     obter_backups_ativos,
@@ -90,6 +92,33 @@ def api_resumo():
     return jsonify(obter_resumo())
 
 
+@bp.route("/api/backups/fila")
+def api_fila():
+    """
+    Retorna contagens vivas da fila de backups:
+    - ativos:          backups em execução agora (banco)
+    - limite_paralelo: teto do Celery worker (--concurrency)
+    - aguardando:      tarefas pendentes na fila Redis do Celery
+    """
+    resumo = obter_resumo()
+    ativos = resumo.get("ativos", 0)
+
+    aguardando = 0
+    try:
+        import redis
+        from config.configuracoes import REDIS_URL
+        r = redis.from_url(REDIS_URL, socket_connect_timeout=2)
+        aguardando = r.llen("celery")
+    except Exception as erro:
+        logger.warning(f"Falha ao consultar fila Redis: {erro}")
+
+    return jsonify({
+        "ativos":          ativos,
+        "limite_paralelo": _LIMITE_PARALELO,
+        "aguardando":      aguardando,
+    })
+
+
 @bp.route("/api/backups/<email>")
 def api_detalhe(email):
     """Retorna dados detalhados de um backup específico."""
@@ -142,4 +171,164 @@ def api_iniciar_manual():
         "ticket_id":     ticket_id,
         "nome":          nome,
         "deletar_conta": deletar_conta,
+    }), 200
+
+
+# Template servido para download — mínimo, apenas cabeçalho.
+# A dica textual no dashboard já explica o formato e o limite.
+_TEMPLATE_CSV_LOTE = "email\n"
+
+
+@bp.route("/api/backups/lote/template")
+def api_lote_template():
+    """Serve um arquivo CSV de exemplo para download (modelo de upload em massa)."""
+    return Response(
+        _TEMPLATE_CSV_LOTE,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="template-backup-massa.csv"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# Regex de validação de e-mail (mesmo padrão usado em /api/backups/iniciar)
+_REGEX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Limite por upload — alinhado com a vazão prática do worker
+# (Celery --concurrency=4) e o limite do Google Vault (18 exports simultâneos).
+# Acima disso o usuário deve dividir o lote em arquivos menores.
+_MAX_EMAILS_POR_LOTE = 50
+
+# Reflete --concurrency do Celery em docker-compose.yml:125.
+# Se aumentar lá, atualizar aqui (ou expor via env var).
+_LIMITE_PARALELO = 4
+
+
+def _extrair_emails_csv(conteudo: str) -> list[str]:
+    """
+    Extrai e-mails de um conteúdo CSV.
+
+    Aceita dois formatos:
+    - CSV com cabeçalho contendo coluna 'email' (case-insensitive)
+    - CSV de coluna única sem cabeçalho (uma linha por e-mail)
+
+    Linhas em branco, comentários (#) e espaços são ignorados.
+    Preserva a ordem e remove duplicatas mantendo a 1ª ocorrência.
+    """
+    leitor = csv.reader(io.StringIO(conteudo))
+    linhas = [linha for linha in leitor if any((c or "").strip() for c in linha)]
+
+    # Remove linhas de comentário no topo (#) — permite que o template tenha
+    # instruções inline antes do cabeçalho 'email'.
+    while linhas and (linhas[0][0] or "").strip().startswith("#"):
+        linhas.pop(0)
+
+    if not linhas:
+        return []
+
+    # Detecta cabeçalho 'email'
+    primeira = [(c or "").strip().lower() for c in linhas[0]]
+    if "email" in primeira:
+        idx_email = primeira.index("email")
+        linhas_dados = linhas[1:]
+    else:
+        idx_email = 0
+        linhas_dados = linhas
+
+    emails: list[str] = []
+    vistos: set[str] = set()
+    for linha in linhas_dados:
+        if idx_email >= len(linha):
+            continue
+        valor = (linha[idx_email] or "").strip().lower()
+        if not valor or valor.startswith("#"):
+            continue
+        if valor in vistos:
+            continue
+        vistos.add(valor)
+        emails.append(valor)
+    return emails
+
+
+@bp.route("/api/backups/lote", methods=["POST"])
+def api_iniciar_lote():
+    """
+    Recebe um arquivo .csv com lista de e-mails e enfileira backups em massa.
+
+    Form-data:
+        arquivo       (obrigatório): arquivo .csv (UTF-8). Aceita coluna 'email'
+                                     com cabeçalho ou uma coluna única sem cabeçalho.
+        deletar_conta (opcional):    "true"/"false" (padrão "true"). Aplicado a
+                                     todos os e-mails do lote.
+
+    Retorna sumário: aceitos, já em processamento, inválidos, duplicados (no arquivo).
+    """
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename:
+        return jsonify({"erro": "Arquivo .csv ausente (campo 'arquivo')"}), 400
+
+    if not arquivo.filename.lower().endswith(".csv"):
+        return jsonify({"erro": "Apenas arquivos .csv são aceitos"}), 400
+
+    # Decodifica forçando UTF-8 com fallback latin-1 (planilhas exportadas no Windows)
+    bytes_arquivo = arquivo.read()
+    try:
+        conteudo = bytes_arquivo.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            conteudo = bytes_arquivo.decode("latin-1")
+        except Exception:
+            return jsonify({"erro": "Não foi possível decodificar o CSV (use UTF-8)"}), 400
+
+    deletar_conta_raw = (request.form.get("deletar_conta") or "true").strip().lower()
+    deletar_conta = deletar_conta_raw in ("true", "1", "sim", "on", "yes")
+
+    emails_brutos = _extrair_emails_csv(conteudo)
+
+    if not emails_brutos:
+        return jsonify({"erro": "Nenhum e-mail encontrado no arquivo"}), 400
+
+    if len(emails_brutos) > _MAX_EMAILS_POR_LOTE:
+        return jsonify({
+            "erro": (
+                f"Lote excede o limite de {_MAX_EMAILS_POR_LOTE} e-mails por upload "
+                f"(recebido: {len(emails_brutos)}). Divida em arquivos menores e "
+                f"envie em sequência — os backups serão enfileirados na ordem."
+            )
+        }), 400
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    aceitos: list[dict] = []
+    ja_em_processamento: list[str] = []
+    invalidos: list[str] = []
+
+    for indice, email in enumerate(emails_brutos, start=1):
+        if not _REGEX_EMAIL.match(email):
+            invalidos.append(email)
+            continue
+        if esta_em_processamento(email):
+            ja_em_processamento.append(email)
+            continue
+        ticket_id = f"LOTE-{timestamp}-{indice:03d}"
+        try:
+            iniciar_backup_async(email, ticket_id, None, deletar_conta=deletar_conta)
+            aceitos.append({"email": email, "ticket_id": ticket_id})
+        except Exception as erro:
+            logger.error(f"Falha ao enfileirar backup em lote para {email}: {erro}")
+            invalidos.append(email)
+
+    logger.info(
+        f"Lote CSV processado — arquivo: {arquivo.filename}, "
+        f"aceitos: {len(aceitos)}, em_processamento: {len(ja_em_processamento)}, "
+        f"invalidos: {len(invalidos)}, deletar_conta: {deletar_conta}"
+    )
+
+    return jsonify({
+        "status": "concluido",
+        "deletar_conta": deletar_conta,
+        "total_linhas":  len(emails_brutos),
+        "aceitos":              aceitos,
+        "ja_em_processamento":  ja_em_processamento,
+        "invalidos":            invalidos,
     }), 200

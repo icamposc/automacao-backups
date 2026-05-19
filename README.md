@@ -1,8 +1,10 @@
 # Automação de Backups — ITO
 
+> Última atualização: 2026-05-19 — versão `2.0.0`
+
 Sistema de automação de backup de dados de colaboradores desligados, integrado ao **Jira Service Management** via webhook.
 
-Ao receber o webhook, o sistema exporta e-mails (Gmail/PST) e arquivos (Google Drive) através do **Google Vault**, compacta tudo em ZIP, faz upload para um **Drive Compartilhado**, submete o formulário do chamado e fecha o ticket — excluindo a conta do Google Workspace somente após confirmar que o backup está no Drive.
+Ao receber o webhook, o sistema exporta os e-mails da caixa Gmail (formato **PST**, via **Google Vault**) e os arquivos do **Google Drive** (formato ZIP), consolida tudo em um único `.zip`, faz upload para um **Drive Compartilhado**, submete o formulário do chamado e fecha o ticket — excluindo a conta do Google Workspace somente após confirmar que o backup está no Drive.
 
 ---
 
@@ -13,6 +15,7 @@ Ao receber o webhook, o sistema exporta e-mails (Gmail/PST) e arquivos (Google D
 - [Pré-requisitos](#pré-requisitos)
 - [Instalação](#instalação)
 - [Configuração](#configuração)
+- [Docker (produção)](#docker-recomendado-para-produção)
 - [Como Executar](#como-executar)
 - [Integração com Jira](#integração-com-jira)
 - [Rotas da API](#rotas-da-api)
@@ -122,12 +125,15 @@ POST /webhook/backup-desligado
 | Upload chunked via requests | Contorna o problema do Netskope que remove o header `Location` no upload resumível do httplib2 |
 | Exclusão segura de conta | Conta só é excluída após verificar (HTTP 200) que o arquivo ZIP existe no Drive Compartilhado |
 | Tolerância a falhas no Jira | Erros de comentário/transição são logados mas não interrompem o backup |
+| Pre-flight de capacidade de disco | Antes de baixar um export do Vault, o sistema confere o espaço livre em `PASTA_VAULT` contra o tamanho declarado e aborta cedo se não couber, evitando falhas tardias |
+| Blacklist de recuperação | Backups que falharam imediatamente após um reinício do servidor não são re-enfileirados em loop pela rotina de recuperação, prevenindo "torrenting" de erros |
+| Healthcheck que retorna 503 quando degradado | `/health` responde 503 se o worker Celery não responder a `inspect ping` em 5 s (D-state, deadlock de FS) ou se o disco em `PASTA_VAULT` estiver abaixo do limite mínimo |
 
 ---
 
 ## Pré-requisitos
 
-- **Python** 3.10 ou superior
+- **Python** 3.11 ou superior
 - **Redis** (broker e backend do Celery) — `redis-server`
 - **Google Workspace** com:
   - Google Vault (Matter pré-configurado)
@@ -203,7 +209,8 @@ Edite o arquivo `.env` com os valores do seu ambiente:
 
 | Variável | Descrição |
 |---|---|
-| `GOOGLE_CHAT_WEBHOOK_URL` | URL do webhook do espaço no Google Chat (opcional) |
+| `GOOGLE_CHAT_WEBHOOK_URL` | URL do webhook do espaço **principal** no Google Chat — notificações operacionais (início, progresso, sucesso). Opcional. |
+| `GOOGLE_CHAT_WEBHOOK_URL_LOGS` | URL do webhook do espaço de **logs** — erros técnicos, falhas e alertas de saúde. Se vazio, esses alertas usam o webhook principal como fallback. |
 
 ### Servidor
 
@@ -217,7 +224,7 @@ Edite o arquivo `.env` com os valores do seu ambiente:
 | Variável | Descrição | Padrão |
 |---|---|---|
 | `POLLING_INTERVALO_SEGUNDOS` | Intervalo entre verificações de status do export | `60` (1 min) |
-| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo máximo de espera por export | `86400` (24 h) |
+| `TIMEOUT_MAXIMO_SEGUNDOS` | Tempo máximo de espera por export | `14400` (4 h) |
 | `MAX_EXPORTS_SIMULTANEOS` | Exports simultâneos no Vault (limite Google: 20) | `18` |
 
 ### Redis e Worker Celery
@@ -245,6 +252,8 @@ REQUESTS_CA_BUNDLE=/caminho/para/ca-bundle.crt
 ## Docker (recomendado para produção)
 
 O projeto inclui `Dockerfile` e `docker-compose.yml` prontos. Uma única imagem é usada para o servidor e o worker — apenas o comando muda.
+
+> Para deploy em servidor Ubuntu (com Docker em disco dedicado e `data-root` no HDD), veja o guia completo em [docs/instalacao-ubuntu-servidor.md](docs/instalacao-ubuntu-servidor.md).
 
 ### Pré-requisitos
 
@@ -292,12 +301,15 @@ docker compose ps
 
 ### Observações sobre o .env com Docker
 
-O `docker-compose.yml` sobrescreve automaticamente duas variáveis — **não é necessário alterá-las no `.env`**:
+O `docker-compose.yml` sobrescreve automaticamente as variáveis abaixo — **não é necessário alterá-las no `.env`**:
 
 | Variável | Valor no Docker |
 |---|---|
 | `REDIS_URL` | `redis://redis:6379/0` (rede interna do Compose) |
 | `SQLITE_PATH` | `/app/storage/backups.db` (volume dedicado) |
+| `PASTA_LOGS` | `/app/logs` (volume `logs_data`) |
+| `PASTA_TEMP` | `/app/temp` (volume `temp_data` no SSD) |
+| `PASTA_VAULT` | `/mnt/hdd/vault` (bind mount no HDD) |
 
 ---
 
@@ -329,7 +341,12 @@ redis-server &
 python -m app.servidor
 
 # 3. Worker Celery (em outro terminal)
-celery -A worker.celery_app worker --loglevel=info --concurrency=1
+#    PYTHONPATH=$PWD é necessário para o Celery encontrar os módulos
+#    locais (dados, processamento, servicos etc.) ao rodar fora do Docker.
+#    --pool=threads é obrigatório: o semáforo global de exports do Vault
+#    é process-local e só funciona com pool de threads.
+export PYTHONPATH=$PWD
+celery -A worker.celery_app worker --loglevel=info --pool=threads --concurrency=4
 ```
 
 ### Produção (Gunicorn + Celery)
@@ -341,13 +358,21 @@ source venv/bin/activate
 gunicorn -w 2 -b 0.0.0.0:5000 --timeout 120 app.servidor:app
 
 # Worker (em outro terminal ou como serviço)
-celery -A worker.celery_app worker --loglevel=info --concurrency=1 \
-    --logfile=logs/celery_worker.log --detach
+export PYTHONPATH=$PWD
+celery -A worker.celery_app worker \
+    --loglevel=info --pool=threads --concurrency=4 \
+    --logfile=logs/celery_worker.log --detach --pidfile=logs/celery_worker.pid
 ```
+
+> A `--concurrency=4` reflete o valor usado em produção (Docker Compose). Em ambientes com I/O mais rápido (NVMe), é seguro subir para 8 — observando que o limite de exports paralelos do Vault (`MAX_EXPORTS_SIMULTANEOS=18`) corresponde a ~9 backups simultâneos.
 
 ### Verificar se está rodando
 
 ```bash
+# Health check detalhado (recomendado — usado pelos healthchecks do Compose)
+curl http://localhost:5000/health
+
+# Health check simples (alias legado para monitoramento básico tipo PRTG/Zabbix)
 curl http://localhost:5000/saude
 # {"status": "ok", "servico": "automacao-backups", "versao": "2.0.0"}
 ```
@@ -511,6 +536,10 @@ Retorna o histórico de backups finalizados com paginação (JSON).
 
 Retorna contadores gerais: total, concluídos, em andamento, com erro (JSON).
 
+### `GET /api/backups/fila`
+
+Retorna o estado vivo da fila Celery: backups em execução, limite paralelo configurado e itens aguardando worker (JSON).
+
 ### `GET /api/backups/<email>`
 
 Retorna o backup mais recente (ativo ou finalizado) para o e-mail informado.
@@ -543,6 +572,27 @@ Inicia um backup manualmente sem depender do webhook do Jira.
 | `400` | E-mail inválido ou ausente |
 | `409` | Já existe um backup em andamento para este e-mail |
 
+### `GET /api/backups/lote/template`
+
+Faz download de um template CSV com o cabeçalho esperado pelo endpoint de lote (`email,nome,ticket_id`). Útil para preencher e reenviar via `/api/backups/lote`.
+
+### `POST /api/backups/lote`
+
+Recebe um CSV com até **50 e-mails** e enfileira um backup por linha, ignorando duplicatas e e-mails já em processamento.
+
+**Form data:**
+
+| Campo | Tipo | Obrigatório | Descrição |
+|---|---|---|---|
+| `arquivo` | file (CSV, UTF-8) | Sim | CSV com cabeçalho `email,nome,ticket_id` — limite de 50 linhas |
+
+**Respostas:**
+
+| Código | Descrição |
+|---|---|
+| `200` | Lote processado — JSON com `enfileirados`, `ignorados` e detalhes por e-mail |
+| `400` | CSV ausente, malformado ou acima do limite de 50 linhas |
+
 ---
 
 ## Notificações Google Chat
@@ -572,6 +622,7 @@ Acesse `http://[servidor]:5000/dashboard` para visualizar:
 - **Histórico** — backups finalizados com status, link do Drive e SHA-256 do ZIP
 - **Contadores** — em andamento, concluídos, com erro e total
 - **Disparo manual** — formulário para iniciar um backup sem depender do webhook do Jira
+- **Upload em lote via CSV** — envio de planilha com até **50 e-mails** de uma vez; template disponível em `/api/backups/lote/template`
 - **Auto-refresh** — dados atualizados automaticamente a cada 10 segundos
 
 ---
@@ -580,9 +631,16 @@ Acesse `http://[servidor]:5000/dashboard` para visualizar:
 
 ### Testes Unitários
 
+A suíte cobre cerca de **98 funções em 11 arquivos** `test_*.py`, incluindo webhook, orquestrador, compactação, integrações Google (Vault/Drive/Chat), rastreador, recuperação, retry e performance.
+
 ```bash
 source venv/bin/activate
+
+# Rodar toda a suíte
 pytest testes/ -v
+
+# Com relatório de cobertura (pytest-cov já faz parte das dependências de teste)
+pytest testes/ --cov=. --cov-report=term-missing
 ```
 
 ### Simular Webhook Manualmente
@@ -629,6 +687,8 @@ automacao-backups/
 │   ├── compactacao.py              #   Compactação ZIP com verificação de espaço
 │   ├── limpeza.py                  #   Remoção de temporários e ZIPs
 │   ├── rastreador.py               #   Interface pública de rastreamento (delega para repositorio_backups)
+│   ├── recuperacao.py              #   Retoma backups interrompidos no startup (com blacklist)
+│   ├── saude.py                    #   Coleta de métricas de saúde (worker, disco, fila)
 │   └── __init__.py
 │
 ├── servicos/                       # Integrações com APIs externas
@@ -660,25 +720,40 @@ automacao-backups/
 │   ├── iniciar_servidor.sh         #   Inicia o servidor (Gunicorn ou Flask --dev)
 │   └── iniciar_worker.sh           #   Inicia o worker Celery (produção ou --dev)
 │
-├── testes/                         # Testes
+├── testes/                         # Testes (pytest)
 │   ├── conftest.py                 #   Fixtures compartilhadas do pytest
 │   ├── test_webhook_handler.py     #   Testes do handler de webhook
+│   ├── test_servidor.py            #   Testes das rotas Flask (webhook, health, dashboard)
 │   ├── test_orquestrador.py        #   Testes do orquestrador
 │   ├── test_compactacao.py         #   Testes de compactação ZIP
 │   ├── test_vault_exportacao.py    #   Testes de integração com Google Vault
 │   ├── test_drive_upload.py        #   Testes de upload para Google Drive
 │   ├── test_google_chat.py         #   Testes de notificação no Google Chat
 │   ├── test_rastreador.py          #   Testes do rastreador de estado
+│   ├── test_recuperacao.py         #   Testes da rotina de recuperação de backups interrompidos
+│   ├── test_retry.py               #   Testes do mecanismo de retry (backoff exponencial)
+│   ├── test_performance.py         #   Benchmarks e simulações de carga (I/O, compactação)
 │   └── simular_webhook.py          #   Simulador para testes manuais
 │
+├── deploy/                         # Artefatos de produção
+│   ├── Dockerfile                  #   Imagem usada em produção (Portainer)
+│   └── docker-compose.yml          #   Compose com paths absolutos do servidor de produção
+│
 ├── docs/                           # Documentação técnica
+│   ├── instalacao-ubuntu-servidor.md  # Passo-a-passo de deploy em Ubuntu 26.04 (Docker no sdb1)
 │   ├── requisitos-jira-webhook.md  #   Requisitos da integração com Jira
 │   ├── webhook-e-mensagens-jira.md #   Payload e mensagens por etapa
-│   └── arquitetura-onpremise.md    #   Diagrama e descrição da arquitetura on-premise
+│   ├── arquitetura-onpremise.md    #   Diagrama e descrição da arquitetura on-premise
+│   ├── configuracao-producao.md    #   Detalhes de infraestrutura, volumes e variáveis em produção
+│   ├── CONTEXTO-OPERACIONAL.md     #   Guia operacional (incidentes, diagnóstico, checklist)
+│   └── paper-tco-infraestrutura-backup.md  # Análise de TCO (rascunho)
 │
 ├── logs/                           # Logs com rotação automática (gitignore)
 ├── temp/                           # Arquivos temporários do processamento (gitignore)
+├── Dockerfile                      # Imagem para dev/homologação (Python 3.11-slim)
+├── docker-compose.yml              # Compose para dev/homologação (volumes nomeados)
 ├── requirements.txt                # Dependências Python
+├── pytest.ini                      # Configuração do pytest
 ├── .env.example                    # Modelo de variáveis de ambiente
 └── .gitignore
 ```
