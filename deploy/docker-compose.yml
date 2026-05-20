@@ -55,8 +55,13 @@ services:
     restart: unless-stopped
     networks:
       - automacao_net
+    env_file:
+      - .env
     environment:
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
+      # `environment:` SOBRESCREVE `env_file:` quando a chave existe nos dois.
+      # Isso é intencional: paths/URLs do Docker têm que vir do compose,
+      # não do .env (que tem valores de Dev/host).
       PYTHONPATH: /app
       REDIS_URL: redis://redis:6379/0
       SQLITE_PATH: /app/storage/backups.db
@@ -111,6 +116,8 @@ services:
     restart: unless-stopped
     networks:
       - automacao_net
+    env_file:
+      - .env
     environment:
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
       PYTHONPATH: /app
