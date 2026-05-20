@@ -95,7 +95,12 @@ def coletar_status_saude() -> Tuple[str, dict]:
     # ── Celery ────────────────────────────────────────────────────────────
     try:
         from worker.celery_app import app as celery_app
-        pongs = celery_app.control.inspect(timeout=5).ping()
+        # timeout=1s e suficiente para workers locais (rede docker, resposta < 50ms)
+        # e ainda absorve picos de carga. O `inspect.ping()` do Celery SEMPRE
+        # espera o timeout inteiro para coletar respostas via Redis pub/sub,
+        # entao timeout maior so adiciona latencia ao /health sem ganho real.
+        # Antes era 5s e fazia o endpoint demorar ~6s em cada request.
+        pongs = celery_app.control.inspect(timeout=1).ping()
         if pongs:
             componentes["celery"] = f"ok ({len(pongs)} worker(s))"
         else:
