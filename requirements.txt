@@ -15,6 +15,9 @@ google-auth==2.37.0
 # Adaptador HTTP para google-auth com httplib2
 google-auth-httplib2==0.2.0
 
+# Transporte HTTP do google-api-python-client (importado direto em servicos/google_auth.py)
+httplib2==0.31.2
+
 # Download de arquivos do Cloud Storage (exports do Vault)
 google-cloud-storage==2.19.0
 
