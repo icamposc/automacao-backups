@@ -133,8 +133,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      servidor:
-        condition: service_healthy
+    # OBS: worker depende SOMENTE do redis (broker) — nao do servidor.
+    # Antes existia tambem 'servidor: service_healthy', mas isso criava
+    # um deadlock circular: se o /health do servidor reportasse 'degradado'
+    # por celery sem workers (warning), o servidor ficaria unhealthy e o
+    # worker nunca subiria. Sem essa dependencia, o worker sobe
+    # independentemente e o /health do servidor passa a 'ok' assim que
+    # o inspect ping responde.
     healthcheck:
       test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping --destination worker@$(hostname) --timeout 5"]
       interval: 30s
