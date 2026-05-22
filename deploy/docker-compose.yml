@@ -68,6 +68,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
+      NAS_SYNC_DIR: /mnt/hdd/sync_nas
       # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
       GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
       SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
@@ -81,6 +82,7 @@ services:
       - logs_data:/app/logs
       - temp_data:/app/temp
       - /mnt/hdd/vault:/mnt/hdd/vault
+      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy
@@ -126,6 +128,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
+      NAS_SYNC_DIR: /mnt/hdd/sync_nas
       # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
       GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
       SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
@@ -137,6 +140,7 @@ services:
       - logs_data:/app/logs
       - temp_data:/app/temp
       - /mnt/hdd/vault:/mnt/hdd/vault
+      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy

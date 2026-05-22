@@ -25,10 +25,11 @@ from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
 from app.dashboard import bp as dashboard_bp
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from dados.repositorio_backups import existe_backup_concluido_por_ticket
-from processamento.limpeza import limpar_logs_antigos
+from processamento.limpeza import limpar_logs_antigos, limpar_zips_sincronizados
 from dados.banco import inicializar_banco
 from processamento.recuperacao import recuperar_backups_interrompidos
 from processamento.saude import coletar_status_saude, iniciar_monitor_saude
+from processamento.finalizacao_nas import iniciar_monitor_finalizacao_nas
 from utils.logger import obter_logger
 
 logger = obter_logger("servidor")
@@ -50,9 +51,16 @@ recuperar_backups_interrompidos()
 # limpeza de logs pode demorar — executa em background para não atrasar o startup
 threading.Thread(target=limpar_logs_antigos, daemon=True).start()
 
+# limpeza dos ZIPs ja sincronizados pelo NAS (markers .uploaded antigos)
+threading.Thread(target=limpar_zips_sincronizados, daemon=True).start()
+
 # Monitor de saúde — thread daemon que alerta no Google Chat de LOGS quando
 # o sistema entra/sai do estado degradado (componentes, disco, backups stuck).
 iniciar_monitor_saude()
+
+# Monitor de finalizacao NAS — thread daemon que, a cada 30 min, varre backups
+# em status 'aguardando_nas' ha mais de 23h e fecha o ciclo (Jira + conta + chat).
+iniciar_monitor_finalizacao_nas()
 
 
 @app.route("/webhook/backup-desligado", methods=["POST"])

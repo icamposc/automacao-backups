@@ -92,10 +92,13 @@ def inicializar_banco() -> None:
         CREATE INDEX IF NOT EXISTS idx_etapas_backup         ON etapas_backup(backup_id);
 
         -- Índice único parcial: impede dois backups ativos para o mesmo e-mail.
-        -- Se dois webhooks chegarem simultaneamente (race condition), o segundo
-        -- INSERT falha com IntegrityError e é rejeitado antes de qualquer dano.
+        -- Cobre 'em_andamento' (worker rodando) e 'aguardando_nas' (aguardando coleta
+        -- pelo NAS Synology dentro da janela de 23h). Se um novo webhook chega para o
+        -- mesmo email enquanto o anterior ainda nao foi finalizado, o INSERT falha
+        -- com IntegrityError e e rejeitado antes de qualquer dano.
         CREATE UNIQUE INDEX IF NOT EXISTS idx_backups_email_ativo
-            ON backups(email) WHERE status_geral = 'em_andamento';
+            ON backups(email)
+            WHERE status_geral IN ('em_andamento', 'aguardando_nas');
     """)
 
     conn.commit()
@@ -106,6 +109,8 @@ def inicializar_banco() -> None:
          "coluna 'progresso_pct' adicionada à tabela etapas_backup"),
         ("ALTER TABLE backups ADD COLUMN deletar_conta INTEGER NOT NULL DEFAULT 1",
          "coluna 'deletar_conta' adicionada à tabela backups"),
+        ("ALTER TABLE backups ADD COLUMN inicio_aguardando_nas TEXT",
+         "coluna 'inicio_aguardando_nas' adicionada à tabela backups"),
     ]
     for sql, descricao in migracoes:
         try:
@@ -114,6 +119,20 @@ def inicializar_banco() -> None:
             logger.info(f"Migração aplicada: {descricao}")
         except sqlite3.OperationalError:
             pass  # Coluna já existe
+
+    # Recria o índice único parcial para garantir que bancos antigos (que tinham o
+    # filtro apenas com 'em_andamento') passem a cobrir também 'aguardando_nas'.
+    # SQLite nao tem CREATE OR REPLACE INDEX, entao DROP+CREATE.
+    try:
+        conn.execute("DROP INDEX IF EXISTS idx_backups_email_ativo")
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_backups_email_ativo "
+            "ON backups(email) "
+            "WHERE status_geral IN ('em_andamento', 'aguardando_nas')"
+        )
+        conn.commit()
+    except sqlite3.OperationalError as erro:
+        logger.warning(f"Falha ao recriar idx_backups_email_ativo: {erro}")
 
     conn.close()
     logger.info(f"Banco de dados inicializado: {SQLITE_PATH}")

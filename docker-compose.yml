@@ -52,6 +52,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
+      NAS_SYNC_DIR: /mnt/hdd/sync_nas
     ports:
       - "${SERVIDOR_PORTA:-5000}:5000"
     volumes:
@@ -64,6 +65,8 @@ services:
       - temp_data:/app/temp
       # Exports do Vault (PST/ZIP) no HDD — bind mount direto
       - /mnt/hdd/vault:/mnt/hdd/vault
+      # Pasta de sync com NAS Synology (NAS faz pull via SMB/NFS)
+      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy
@@ -102,6 +105,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
+      NAS_SYNC_DIR: /mnt/hdd/sync_nas
     volumes:
       - ./config/credenciais:/app/config/credenciais:ro
       - storage_data:/app/storage
@@ -110,6 +114,8 @@ services:
       - temp_data:/app/temp
       # Exports do Vault (PST/ZIP) no HDD — bind mount direto
       - /mnt/hdd/vault:/mnt/hdd/vault
+      # Pasta de sync com NAS Synology (NAS faz pull via SMB/NFS)
+      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy

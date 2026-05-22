@@ -32,6 +32,7 @@ from servicos.vault_exportacao import (
     liberar_semaforo_exportacao,
 )
 from servicos.drive_upload import fazer_upload
+from servicos.nas_sync import disponibilizar_para_nas, ErroNasSync
 from servicos.conta_exclusao import verificar_e_deletar_conta
 from servicos.jira_atualizacao import (
     comentar_inicio,
@@ -229,6 +230,11 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
     link_drive = None
     sha256_zip = None
     _backup_concluido = False
+    # Flag usada pelo `finally`: quando o destino e NAS, o ZIP permanece em
+    # /mnt/hdd/sync_nas/ para o NAS coletar e NAO deve ser apagado pelo
+    # limpar_arquivo_zip da limpeza imediata. A limpeza desse ZIP e feita
+    # depois pela limpar_zips_sincronizados (apos NAS_SYNC_RETENCAO_DIAS).
+    _manter_zip_local = False
 
     try:
         # ─────────────────────────────────────────────────────────
@@ -402,73 +408,138 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         atualizar_etapa(email, 5, STATUS_CONCLUIDO)
 
         # ─────────────────────────────────────────────────────────
-        # ETAPA 6: Upload para Google Drive Compartilhado
+        # ETAPA 6: Disponibilizar .zip para o NAS Synology (com fallback Drive)
         # ─────────────────────────────────────────────────────────
-        logger.info("[ETAPA 6/8] Enviando .zip para Google Drive Compartilhado...")
+        # Estrategia: o NAS faz pull do disco local (montado nele via SMB/NFS).
+        # O servidor apenas MOVE o ZIP para NAS_SYNC_DIR e cria um marker .ready.
+        # Se isso falhar (disco cheio, permissao), cai para upload direto no Drive.
+        logger.info("[ETAPA 6/8] Disponibilizando .zip para o NAS Synology...")
         atualizar_etapa(email, 6, STATUS_EM_ANDAMENTO)
-        comentar_progresso(ticket_id, "Enviando backup para Google Drive Compartilhado...")
+        comentar_progresso(ticket_id, "Disponibilizando backup para o NAS Synology...")
 
+        destino_usado = "nas"
+        tamanho_mb = caminho_zip.stat().st_size / (1024 * 1024)
         try:
-            tamanho_mb = caminho_zip.stat().st_size / (1024 * 1024)
-            resultado_upload = fazer_upload(
+            resultado_upload = disponibilizar_para_nas(
                 caminho_zip, nome_zip, sha256=sha256_zip,
                 on_progresso=lambda pct: atualizar_progresso(email, 6, pct),
             )
-        except Exception as erro:
-            raise ErroUpload(str(erro)) from erro
+        except (ErroNasSync, OSError) as erro_nas:
+            logger.warning(
+                f"NAS sync falhou ({erro_nas}) — caindo para fallback Google Drive."
+            )
+            comentar_progresso(
+                ticket_id,
+                "Falha ao disponibilizar para o NAS — enviando para Google Drive (fallback)..."
+            )
+            destino_usado = "drive"
+            try:
+                resultado_upload = fazer_upload(
+                    caminho_zip, nome_zip, sha256=sha256_zip,
+                    on_progresso=lambda pct: atualizar_progresso(email, 6, pct),
+                )
+            except Exception as erro:
+                raise ErroUpload(str(erro)) from erro
 
         link_drive = resultado_upload.get("webViewLink", "Link não disponível")
         atualizar_etapa(email, 6, STATUS_CONCLUIDO)
 
         # ─────────────────────────────────────────────────────────
-        # ETAPA 7: Atualizar Jira
+        # Libera os originais (PSTs do Vault, exports do Drive) IMEDIATAMENTE.
+        # O ZIP ja esta seguro (em sync_nas ou no Drive), entao manter os
+        # originais aqui so duplica armazenamento e atrasa a liberacao de disco
+        # para o proximo backup da fila. Em backups grandes (470 GB+ de PSTs)
+        # isso reduz o peak de disco pela metade durante o restante do ciclo.
+        # A chamada e segura: idempotente (no-op se a pasta ja foi apagada) e
+        # o `finally` no fim do try refaz como salvaguarda.
         # ─────────────────────────────────────────────────────────
-        logger.info("[ETAPA 7/8] Atualizando ticket Jira com resultado...")
-        atualizar_etapa(email, 7, STATUS_EM_ANDAMENTO)
-        comentar_sucesso(ticket_id, email, link_drive, deletar_conta=deletar_conta)
-        atualizar_etapa(email, 7, STATUS_CONCLUIDO)
+        logger.info("Removendo originais baixados — ZIP ja consolidado.")
+        limpar_arquivos_temporarios(pasta_colaborador)
 
         # ─────────────────────────────────────────────────────────
-        # ETAPA 8: Verificar backup + excluir conta (se habilitado)
+        # Fluxo bifurca apos a Etapa 6: NAS (aguarda 23h e monitor finaliza)
+        # vs Drive (fallback — fluxo classico Etapas 7 e 8).
         # ─────────────────────────────────────────────────────────
-        if deletar_conta:
-            logger.info("[ETAPA 8/8] Verificando backup no Drive e excluindo conta...")
+        if destino_usado == "nas":
+            # Worker terminou. O ZIP esta em /mnt/hdd/sync_nas/ aguardando o
+            # NAS Synology coletar (janela de 23h, responsabilidade externa).
+            # Apos isso, o monitor `processamento.finalizacao_nas` fechara o
+            # ticket no Jira, excluira a conta Workspace (se aplicavel) e
+            # promovera o marker .ready -> .uploaded para a limpeza apagar
+            # o ZIP local depois de NAS_SYNC_RETENCAO_DIAS dias.
+            from dados.repositorio_backups import marcar_aguardando_nas
+            marcar_aguardando_nas(email, link_drive)
+            comentar_progresso(
+                ticket_id,
+                "Backup compactado e disponibilizado para coleta pelo NAS Synology. "
+                "Encerramento automatico do chamado em ate 23 horas."
+            )
+            # Etapas 7 e 8 ficam como concluidas no rastreador (visivel no dashboard).
+            # O ciclo final (Jira + exclusao + chat) e atribuido ao monitor.
+            atualizar_etapa(email, 7, STATUS_CONCLUIDO)
+            atualizar_etapa(email, 8, STATUS_CONCLUIDO)
+
+            logger.info(f"{'=' * 60}")
+            logger.info(f"BACKUP AGUARDANDO NAS — {identificador}")
+            logger.info(f"Caminho local: {link_drive}")
+            logger.info(f"SHA256 ZIP: {sha256_zip}")
+            logger.info(f"{'=' * 60}")
+
+            # Limpa apenas a pasta_colaborador (exports brutos do Vault).
+            # O ZIP em sync_nas DEVE permanecer ate o monitor promover o marker.
+            _backup_concluido = True
+            _manter_zip_local = True
         else:
-            logger.info("[ETAPA 8/8] Verificando backup no Drive (exclusão de conta desativada)...")
-        atualizar_etapa(email, 8, STATUS_EM_ANDAMENTO)
+            # destino_usado == "drive" (fallback) — fluxo original abaixo
+            # ─────────────────────────────────────────────────────────
+            # ETAPA 7: Atualizar Jira
+            # ─────────────────────────────────────────────────────────
+            logger.info("[ETAPA 7/8] Atualizando ticket Jira com resultado...")
+            atualizar_etapa(email, 7, STATUS_EM_ANDAMENTO)
+            comentar_sucesso(ticket_id, email, link_drive, deletar_conta=deletar_conta)
+            atualizar_etapa(email, 7, STATUS_CONCLUIDO)
 
-        arquivo_id = resultado_upload.get("id")
+            # ─────────────────────────────────────────────────────────
+            # ETAPA 8: Verificar backup + excluir conta (se habilitado)
+            # ─────────────────────────────────────────────────────────
+            if deletar_conta:
+                logger.info("[ETAPA 8/8] Verificando backup no Drive e excluindo conta...")
+            else:
+                logger.info("[ETAPA 8/8] Verificando backup no Drive (exclusão de conta desativada)...")
+            atualizar_etapa(email, 8, STATUS_EM_ANDAMENTO)
 
-        if deletar_conta:
-            comentar_progresso(ticket_id, "Verificando backup no Drive Compartilhado antes de excluir a conta...")
-            try:
-                resultado_exclusao = verificar_e_deletar_conta(email, arquivo_id)
-            except Exception as erro:
-                raise ErroExclusaoConta(str(erro)) from erro
-            logger.info(f"Conta excluída: {resultado_exclusao}")
-            comentar_conta_excluida(ticket_id, email)
-            chat_notificar_conta_excluida(email, ticket_id, nome)
-        else:
-            logger.info(f"Exclusão de conta desativada para este backup — conta de {email} mantida")
+            arquivo_id = resultado_upload.get("id")
 
-        submeter_formularios_pendentes(ticket_id)
+            if deletar_conta:
+                comentar_progresso(ticket_id, "Verificando backup no Drive Compartilhado antes de excluir a conta...")
+                try:
+                    resultado_exclusao = verificar_e_deletar_conta(email, arquivo_id)
+                except Exception as erro:
+                    raise ErroExclusaoConta(str(erro)) from erro
+                logger.info(f"Conta excluída: {resultado_exclusao}")
+                comentar_conta_excluida(ticket_id, email)
+                chat_notificar_conta_excluida(email, ticket_id, nome)
+            else:
+                logger.info(f"Exclusão de conta desativada para este backup — conta de {email} mantida")
 
-        transicionar_resolvido(ticket_id)
+            submeter_formularios_pendentes(ticket_id)
 
-        atualizar_etapa(email, 8, STATUS_CONCLUIDO)
+            transicionar_resolvido(ticket_id)
 
-        _backup_concluido = True
-        finalizar_backup(email, sucesso=True, link_drive=link_drive, sha256_zip=sha256_zip)
-        chat_notificar_sucesso(email, ticket_id, link_drive, nome, deletar_conta=deletar_conta)
+            atualizar_etapa(email, 8, STATUS_CONCLUIDO)
 
-        logger.info(f"{'=' * 60}")
-        if deletar_conta:
-            logger.info(f"BACKUP CONCLUÍDO E CONTA EXCLUÍDA — {identificador}")
-        else:
-            logger.info(f"BACKUP CONCLUÍDO (conta mantida) — {identificador}")
-        logger.info(f"Link no Drive: {link_drive}")
-        logger.info(f"SHA256 ZIP: {sha256_zip}")
-        logger.info(f"{'=' * 60}")
+            _backup_concluido = True
+            finalizar_backup(email, sucesso=True, link_drive=link_drive, sha256_zip=sha256_zip)
+            chat_notificar_sucesso(email, ticket_id, link_drive, nome, deletar_conta=deletar_conta)
+
+            logger.info(f"{'=' * 60}")
+            if deletar_conta:
+                logger.info(f"BACKUP CONCLUÍDO E CONTA EXCLUÍDA — {identificador}")
+            else:
+                logger.info(f"BACKUP CONCLUÍDO (conta mantida) — {identificador}")
+            logger.info(f"Destino: DRIVE | Link: {link_drive}")
+            logger.info(f"SHA256 ZIP: {sha256_zip}")
+            logger.info(f"{'=' * 60}")
 
     except ErroVaultTimeout as erro:
         _tratar_erro(email, ticket_id, nome, str(erro))
@@ -511,7 +582,13 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         if _backup_concluido:
             logger.info("Executando limpeza de arquivos temporários...")
             limpar_arquivos_temporarios(pasta_colaborador)
-            limpar_arquivo_zip(caminho_zip)
+            if not _manter_zip_local:
+                limpar_arquivo_zip(caminho_zip)
+            else:
+                logger.info(
+                    "ZIP preservado em sync_nas — sera apagado por "
+                    "limpar_zips_sincronizados apos NAS_SYNC_RETENCAO_DIAS."
+                )
         else:
             logger.info("Backup não concluído — arquivos preservados para reprocessamento.")
 

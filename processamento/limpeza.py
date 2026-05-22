@@ -18,7 +18,10 @@ import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from config.configuracoes import PASTA_LOGS, LOGS_RETENCAO_DIAS, LOGS_TAMANHO_MAXIMO_BYTES
+from config.configuracoes import (
+    PASTA_LOGS, LOGS_RETENCAO_DIAS, LOGS_TAMANHO_MAXIMO_BYTES,
+    NAS_SYNC_DIR, NAS_SYNC_RETENCAO_DIAS,
+)
 from utils.logger import obter_logger
 
 logger = obter_logger("limpeza")
@@ -180,3 +183,85 @@ def limpar_logs_antigos() -> None:
         f"{liberados_tamanho / (1024**2):.1f} MB liberados — "
         f"total atual: {tamanho_atual / (1024**3):.2f} GB"
     )
+
+
+def limpar_zips_sincronizados() -> None:
+    """Apaga ZIPs em NAS_SYNC_DIR cujo marker .uploaded tem mais de NAS_SYNC_RETENCAO_DIAS dias.
+
+    Fluxo:
+      1. Servidor moveu ZIP para NAS_SYNC_DIR/<email>/<arquivo>.zip + marker .ready
+      2. NAS coletou o arquivo e renomeou .ready -> .uploaded
+      3. Esta funcao varre por *.uploaded. Se mtime > retencao, apaga o ZIP + o marker.
+
+    Chamada na inicializacao do servidor (junto com limpar_logs_antigos), com
+    seguranca: se NAS_SYNC_DIR nao existir ou estiver vazio, nao faz nada.
+    """
+    if not NAS_SYNC_DIR.exists():
+        logger.debug(f"NAS_SYNC_DIR nao existe — pulando limpeza: {NAS_SYNC_DIR}")
+        return
+
+    logger.info(
+        f"Iniciando limpeza de ZIPs sincronizados com NAS — "
+        f"retencao: {NAS_SYNC_RETENCAO_DIAS} dias | base: {NAS_SYNC_DIR}"
+    )
+
+    limite_data = datetime.now() - timedelta(days=NAS_SYNC_RETENCAO_DIAS)
+
+    apagados = 0
+    liberado_total = 0
+    pendentes = 0
+
+    # rglob captura markers em subpastas por email
+    for marker in NAS_SYNC_DIR.rglob("*.uploaded"):
+        try:
+            modificado_em = datetime.fromtimestamp(marker.stat().st_mtime)
+            if modificado_em >= limite_data:
+                pendentes += 1
+                continue
+
+            # O ZIP correspondente: marker <nome>.zip.uploaded -> ZIP <nome>.zip
+            zip_associado = marker.with_suffix("")  # remove .uploaded, fica .zip
+            if zip_associado.exists():
+                tamanho = zip_associado.stat().st_size
+                zip_associado.unlink()
+                liberado_total += tamanho
+                logger.info(
+                    f"ZIP sincronizado apagado: {zip_associado.name} "
+                    f"({tamanho / (1024**2):.1f} MB) — marker de {modificado_em.strftime('%Y-%m-%d')}"
+                )
+            else:
+                logger.warning(
+                    f"Marker {marker.name} encontrado mas ZIP nao existe: {zip_associado}"
+                )
+
+            marker.unlink()
+            apagados += 1
+
+        except Exception as erro:
+            logger.error(f"Erro ao processar marker {marker.name}: {erro}")
+
+    if apagados or pendentes:
+        logger.info(
+            f"Limpeza NAS: {apagados} ZIP(s) apagado(s) "
+            f"({liberado_total / (1024**3):.2f} GB liberados) | "
+            f"{pendentes} ainda dentro do periodo de retencao."
+        )
+    else:
+        logger.info("Limpeza NAS: nenhum marker .uploaded encontrado.")
+
+    # Bonus: alerta de markers .ready muito antigos (NAS nao puxou)
+    limite_alerta = datetime.now() - timedelta(days=NAS_SYNC_RETENCAO_DIAS)
+    stale_ready = []
+    for marker in NAS_SYNC_DIR.rglob("*.ready"):
+        try:
+            if datetime.fromtimestamp(marker.stat().st_mtime) < limite_alerta:
+                stale_ready.append(marker)
+        except Exception:
+            pass
+
+    if stale_ready:
+        logger.warning(
+            f"ATENCAO: {len(stale_ready)} arquivo(s) com marker .ready "
+            f"ha mais de {NAS_SYNC_RETENCAO_DIAS} dias sem confirmacao do NAS. "
+            f"Verificar conectividade/agendamento do NAS Synology."
+        )

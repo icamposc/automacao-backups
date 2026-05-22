@@ -131,6 +131,82 @@ def finalizar_backup(
     logger.debug(f"Backup finalizado: id={backup_id}, sucesso={sucesso}")
 
 
+def marcar_aguardando_nas(email: str, link_local: str) -> None:
+    """Transiciona o backup ativo para status 'aguardando_nas'.
+
+    Chamado pelo orquestrador quando o ZIP foi movido para sync_nas com
+    sucesso e o worker pode encerrar. O monitor de finalizacao_nas (thread
+    daemon do servidor) pegara esse registro depois de 23h e fechara o ciclo.
+
+    Args:
+        email:       Email do colaborador (chave para encontrar o backup ativo).
+        link_local:  Caminho/URI do ZIP em sync_nas (ex: 'nas:/mnt/hdd/sync_nas/...zip').
+                     Guardado em link_drive (campo generico de "onde esta o arquivo").
+    """
+    backup_id = _obter_id_ativo(email)
+    if backup_id is None:
+        logger.warning(f"Backup ativo não encontrado ao marcar aguardando_nas: {email}")
+        return
+
+    conn = obter_conexao()
+    conn.execute(
+        """UPDATE backups
+           SET status_geral          = 'aguardando_nas',
+               inicio_aguardando_nas = ?,
+               link_drive            = ?
+           WHERE id = ?""",
+        (
+            datetime.now(timezone.utc).isoformat(),
+            link_local,
+            backup_id,
+        ),
+    )
+    conn.commit()
+    logger.info(f"Backup #{backup_id} ({email}) -> aguardando_nas (link={link_local})")
+
+
+def listar_prontos_para_finalizar(horas: int = 23) -> list:
+    """Lista backups em aguardando_nas que ja passaram do prazo de espera.
+
+    Usado pelo monitor de finalizacao_nas para encerrar tickets, excluir contas
+    Workspace (quando aplicavel) e liberar a limpeza do ZIP local.
+
+    Args:
+        horas: Janela em horas. Backups com inicio_aguardando_nas mais antigo
+               que (NOW - horas) sao retornados.
+
+    Returns:
+        Lista de dicts com id, email, ticket_id, nome, deletar_conta,
+        link_drive, sha256_zip, inicio_aguardando_nas.
+    """
+    from datetime import timedelta
+    conn = obter_conexao()
+    limite = (datetime.now(timezone.utc) - timedelta(hours=horas)).isoformat()
+    rows = conn.execute(
+        """SELECT id, email, ticket_id, nome, deletar_conta, link_drive,
+                  sha256_zip, inicio_aguardando_nas
+           FROM backups
+           WHERE status_geral = 'aguardando_nas'
+             AND inicio_aguardando_nas IS NOT NULL
+             AND inicio_aguardando_nas <= ?
+           ORDER BY inicio_aguardando_nas ASC""",
+        (limite,),
+    ).fetchall()
+    return [
+        {
+            "id":                    r["id"],
+            "email":                 r["email"],
+            "ticket_id":             r["ticket_id"],
+            "nome":                  r["nome"],
+            "deletar_conta":         bool(r["deletar_conta"]),
+            "link_drive":            r["link_drive"],
+            "sha256_zip":            r["sha256_zip"],
+            "inicio_aguardando_nas": r["inicio_aguardando_nas"],
+        }
+        for r in rows
+    ]
+
+
 def atualizar_progresso_etapa(email: str, numero_etapa: int, pct: int) -> None:
     """
     Persiste o percentual de progresso de uma etapa em andamento.
@@ -339,14 +415,16 @@ def obter_resumo() -> dict:
 
     contagem = {r["status_geral"]: r["total"] for r in rows}
     ativos = contagem.get("em_andamento", 0)
+    aguardando_nas = contagem.get("aguardando_nas", 0)
     sucessos = contagem.get("concluido", 0)
     erros = contagem.get("erro", 0)
 
     return {
-        "ativos": ativos,
-        "total_finalizados": sucessos + erros,
-        "sucessos": sucessos,
-        "erros": erros,
+        "ativos":             ativos,
+        "aguardando_nas":     aguardando_nas,
+        "total_finalizados":  sucessos + erros,
+        "sucessos":           sucessos,
+        "erros":              erros,
     }
 
 
@@ -355,10 +433,17 @@ def obter_resumo() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _obter_id_ativo(email: str) -> Optional[int]:
+    """Retorna o id do backup ativo para o email.
+
+    "Ativo" inclui tanto 'em_andamento' (worker rodando) quanto
+    'aguardando_nas' (worker terminou, aguardando coleta pelo NAS).
+    O UNIQUE index `idx_backups_email_ativo` garante que so existe
+    1 backup ativo por email entre esses dois status.
+    """
     conn = obter_conexao()
     row = conn.execute(
         """SELECT id FROM backups
-           WHERE email = ? AND status_geral = 'em_andamento'
+           WHERE email = ? AND status_geral IN ('em_andamento', 'aguardando_nas')
            ORDER BY inicio DESC LIMIT 1""",
         (email,),
     ).fetchone()

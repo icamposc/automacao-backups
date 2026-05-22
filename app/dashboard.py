@@ -102,6 +102,7 @@ def api_fila():
     """
     resumo = obter_resumo()
     ativos = resumo.get("ativos", 0)
+    aguardando_nas = resumo.get("aguardando_nas", 0)
 
     aguardando = 0
     try:
@@ -116,6 +117,7 @@ def api_fila():
         "ativos":          ativos,
         "limite_paralelo": _LIMITE_PARALELO,
         "aguardando":      aguardando,
+        "aguardando_nas":  aguardando_nas,
     })
 
 

@@ -96,6 +96,39 @@ VAULT_MATTER_ID = _obter_variavel("VAULT_MATTER_ID")
 DRIVE_PASTA_DESTINO_ID = _obter_variavel("DRIVE_PASTA_DESTINO_ID")
 
 # ============================================================
+# NAS Synology — Destino primário do backup (pull pelo NAS)
+# ============================================================
+# O servidor MOVE o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip e
+# cria um marker .ready ao lado. O NAS (via task agendada) varre essa pasta,
+# copia para o storage final e renomeia .ready -> .uploaded sinalizando ao
+# servidor que pode apagar o ZIP local depois de NAS_SYNC_RETENCAO_DIAS dias.
+#
+# PROVISIONAMENTO EM PRODUCAO (10.100.80.10):
+#   sudo mkdir -p /mnt/hdd/sync_nas
+#   sudo chown 1000:1000 /mnt/hdd/sync_nas
+#   sudo chmod 755 /mnt/hdd/sync_nas
+# Em DEV (WSL) basta apontar NAS_SYNC_DIR no .env para uma pasta local
+# gravavel (ex: ./dados/sync_nas).
+_nas_sync_dir_env = os.getenv("NAS_SYNC_DIR", "")
+NAS_SYNC_DIR = Path(_nas_sync_dir_env) if _nas_sync_dir_env else Path("/mnt/hdd/sync_nas")
+
+# Cria a pasta apenas se ja for possivel (DEV com path local), sem quebrar o
+# import quando o caminho padrao /mnt/hdd nao existe em ambientes que ainda
+# nao provisionaram o disco. Em PROD a pasta deve existir antes do container
+# subir (vide PROVISIONAMENTO acima); em DEV o usuario deve sobrescrever
+# NAS_SYNC_DIR no .env.
+try:
+    NAS_SYNC_DIR.mkdir(parents=True, exist_ok=True)
+except (PermissionError, FileNotFoundError):
+    # Silencioso: o nas_sync.py tenta criar a subpasta por email no uso real;
+    # se ainda falhar la, o fallback Drive captura via ErroNasSync.
+    pass
+
+NAS_SYNC_RETENCAO_DIAS = int(
+    _obter_variavel("NAS_SYNC_RETENCAO_DIAS", obrigatoria=False, padrao="7")
+)
+
+# ============================================================
 # Jira Service Management — Integração com tickets
 # ============================================================
 JIRA_URL_BASE = _obter_variavel("JIRA_URL_BASE")
