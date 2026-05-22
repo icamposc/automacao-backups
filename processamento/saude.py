@@ -29,11 +29,10 @@ from utils.logger import obter_logger
 
 logger = obter_logger("saude")
 
-# Threshold de disco livre (%); abaixo disso, "degradado".
-_DISCO_MIN_LIVRE_PCT = 20
-
-# Threshold de disco que escala WARNING para CRITICAL.
-_DISCO_CRITICAL_LIVRE_PCT = 5
+# Threshold unico de disco. Abaixo disso, o componente fica degradado e o
+# alerta e classificado direto como CRITICAL — nao ha mais nivel warning para
+# disco. Acima disso, o disco e considerado saudavel e nao entra no card.
+_DISCO_CRITICAL_LIVRE_PCT = 10
 
 # Limite acima do qual um backup em_andamento é considerado "stuck".
 _STUCK_HORAS = 12
@@ -119,7 +118,7 @@ def coletar_status_saude() -> Tuple[str, dict]:
             "livre_gb": round(uso.free / (1024 ** 3), 2),
             "livre_pct": round(livre_pct, 1),
         }
-        if livre_pct < _DISCO_MIN_LIVRE_PCT:
+        if livre_pct < _DISCO_CRITICAL_LIVRE_PCT:
             componentes["disco"] = f"degradado: {livre_pct:.1f}% livre"
             status_geral = "degradado"
         else:
@@ -190,7 +189,6 @@ def _classificar_nivel(problemas: dict, disco_detalhe: dict, stuck: list) -> str
 
     WARNING — sistema degradado mas operacional:
       • Celery sem workers (operação humana pode subir o worker)
-      • Disco entre 5% e 20% livre
       • Outros componentes com erro transitório
 
     None — nada relevante para alertar (silencia o monitor).
@@ -260,7 +258,12 @@ def _verificar_e_alertar() -> None:
     _status, payload = coletar_status_saude()
     componentes = payload["componentes"]
     problemas = _extrair_problemas(componentes)
-    detalhes_disco = componentes.get("disco_detalhe")
+    # So enviamos o detalhe do disco no card quando ele e parte do problema.
+    # Isso evita o ruido de mostrar "Disco — 52% livre" em alertas cujo gatilho
+    # foi outro componente (ex: backup stuck levando para CRITICAL).
+    detalhes_disco = (
+        componentes.get("disco_detalhe") if "disco" in problemas else None
+    )
     stuck = payload.get("backups_stuck") or []
     nivel = _classificar_nivel(problemas, detalhes_disco, stuck)
     agora = time.time()

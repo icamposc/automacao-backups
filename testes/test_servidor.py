@@ -59,7 +59,7 @@ class TestHealthCheck:
         assert body["componentes"]["celery"] == "sem_workers"
 
     def test_health_503_quando_disco_abaixo_do_threshold(self, cliente_flask, healthchecks_ok, mocker):
-        # 5% livre — abaixo do limite de 20%
+        # 5% livre — abaixo do limite de 10%
         mocker.patch(
             "shutil.disk_usage",
             return_value=_DiskUsage(total=400 * 1024 ** 3, used=380 * 1024 ** 3, free=20 * 1024 ** 3),
