@@ -29,6 +29,8 @@ services:
     image: redis:7-alpine
     container_name: automacao_backups_redis
     restart: unless-stopped
+    environment:
+      TZ: America/Sao_Paulo
     networks:
       - automacao_net
     volumes:
@@ -58,6 +60,7 @@ services:
     env_file:
       - ../.env       # path RELATIVO ao diretorio do compose (deploy/)
     environment:
+      TZ: America/Sao_Paulo
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
       # `environment:` SOBRESCREVE `env_file:` quando a chave existe nos dois.
       # Isso é intencional: paths/URLs do Docker têm que vir do compose,
@@ -68,7 +71,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
-      NAS_SYNC_DIR: /mnt/hdd/sync_nas
+      NAS_SYNC_DIR: /mnt/hdd/vault/sync_nas
       # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
       GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
       SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
@@ -82,7 +85,6 @@ services:
       - logs_data:/app/logs
       - temp_data:/app/temp
       - /mnt/hdd/vault:/mnt/hdd/vault
-      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy
@@ -121,6 +123,7 @@ services:
     env_file:
       - ../.env       # path RELATIVO ao diretorio do compose (deploy/)
     environment:
+      TZ: America/Sao_Paulo
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
       PYTHONPATH: /app
       REDIS_URL: redis://redis:6379/0
@@ -128,7 +131,7 @@ services:
       PASTA_LOGS: /app/logs
       PASTA_TEMP: /app/temp
       PASTA_VAULT: /mnt/hdd/vault
-      NAS_SYNC_DIR: /mnt/hdd/sync_nas
+      NAS_SYNC_DIR: /mnt/hdd/vault/sync_nas
       # ── Caminhos de credenciais dentro do container (sobrescrevem o .env local) ──
       GOOGLE_CREDENCIAIS_PATH: /app/config/credenciais/service-account.json
       SSL_CERT_FILE: /app/config/credenciais/ca-bundle.crt
@@ -140,7 +143,6 @@ services:
       - logs_data:/app/logs
       - temp_data:/app/temp
       - /mnt/hdd/vault:/mnt/hdd/vault
-      - /mnt/hdd/sync_nas:/mnt/hdd/sync_nas
     depends_on:
       redis:
         condition: service_healthy
@@ -161,7 +163,7 @@ services:
       celery -A worker.celery_app worker
         --loglevel=info
         --pool=threads
-        --concurrency=10
+        --concurrency=4
         --queues=celery
         --hostname=worker@%h
         --logfile=/app/logs/celery_worker.log

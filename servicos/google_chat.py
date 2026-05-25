@@ -519,3 +519,67 @@ def notificar_conta_excluida(email: str, ticket_id: str, nome: str = None) -> bo
             }
         ],
     )
+
+
+def notificar_restart_servidor(
+    total_interrompidos: int,
+    reagendados: int,
+    bloqueados: int,
+    tickets_afetados: list,
+) -> bool:
+    """Alerta CRITICO no Chat de LOGS — servidor reiniciou com backups em andamento.
+
+    Args:
+        total_interrompidos: Total de backups marcados como erro pelo restart.
+        reagendados:         Quantos foram re-enfileirados automaticamente.
+        bloqueados:          Quantos foram bloqueados pela blacklist (3+ falhas).
+        tickets_afetados:    Lista de dicts {'ticket_id': str, 'email': str}.
+    """
+    LIMITE = 20
+    extras = len(tickets_afetados) - LIMITE
+    tickets_render = tickets_afetados[:LIMITE]
+
+    linhas = []
+    for t in tickets_render:
+        tk = t.get('ticket_id') or '(sem ticket)'
+        em = t.get('email') or ''
+        linhas.append(f'• {tk} — {em}')
+    if extras > 0:
+        linhas.append(f'... e mais {extras} ticket(s)')
+    texto_tickets = '\n'.join(linhas) or '—'
+
+    widgets = [
+        {'decoratedText': {'topLabel': 'Total interrompidos', 'text': str(total_interrompidos)}},
+        {'decoratedText': {'topLabel': 'Reagendados automaticamente', 'text': str(reagendados)}},
+    ]
+    if bloqueados > 0:
+        widgets.append(
+            {'decoratedText': {
+                'topLabel': 'BLOQUEADOS pela blacklist',
+                'text': f'{bloqueados} (3+ falhas — exigem intervencao manual)',
+            }}
+        )
+    widgets.append(
+        {'decoratedText': {
+            'topLabel': 'Tickets afetados',
+            'text': texto_tickets,
+            'wrapText': True,
+        }}
+    )
+    widgets.append(
+        {'decoratedText': {
+            'topLabel': 'Acao necessaria',
+            'text': (
+                'Investigar a causa do restart (manual, kernel update, OOM, '
+                'queda de energia). Acompanhar reagendamentos via /health.'
+            ),
+            'wrapText': True,
+        }}
+    )
+
+    return _enviar_card(
+        titulo='🚨 CRITICAL — Servidor Reiniciou com Backups Ativos',
+        subtitulo=f'{total_interrompidos} backup(s) interrompido(s) pelo restart',
+        secoes=[{'widgets': widgets}],
+        destino=DESTINO_LOGS,
+    )

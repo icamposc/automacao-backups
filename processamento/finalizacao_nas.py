@@ -6,7 +6,7 @@ Versao: 1.0.0
 Data:   2026-05-22
 Descricao: A cada 30 min varre backups em status 'aguardando_nas'
            que ja passaram da janela de 23h (tempo dado ao NAS Synology
-           para coletar o ZIP da pasta /mnt/hdd/sync_nas/) e executa
+           para coletar o ZIP da pasta /mnt/hdd/vault/sync_nas/) e executa
            incondicionalmente o ciclo de encerramento:
 
            - finalizar_backup(status='concluido')
@@ -137,7 +137,7 @@ def finalizar_backups_pendentes() -> dict:
 def _promover_marker(link_local: str) -> None:
     """Renomeia <X>.zip.ready -> <X>.zip.uploaded para liberar a limpeza.
 
-    O link guardado e do formato 'nas:/mnt/hdd/sync_nas/...zip'. Strip do
+    O link guardado e do formato 'nas:/mnt/hdd/vault/sync_nas/...zip'. Strip do
     prefixo 'nas:' antes de mexer no filesystem. Se o marker nao existir
     (ja promovido ou nunca criado), apenas loga e segue.
     """

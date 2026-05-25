@@ -140,7 +140,7 @@ def marcar_aguardando_nas(email: str, link_local: str) -> None:
 
     Args:
         email:       Email do colaborador (chave para encontrar o backup ativo).
-        link_local:  Caminho/URI do ZIP em sync_nas (ex: 'nas:/mnt/hdd/sync_nas/...zip').
+        link_local:  Caminho/URI do ZIP em sync_nas (ex: 'nas:/mnt/hdd/vault/sync_nas/...zip').
                      Guardado em link_drive (campo generico de "onde esta o arquivo").
     """
     backup_id = _obter_id_ativo(email)

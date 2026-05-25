@@ -104,13 +104,17 @@ DRIVE_PASTA_DESTINO_ID = _obter_variavel("DRIVE_PASTA_DESTINO_ID")
 # servidor que pode apagar o ZIP local depois de NAS_SYNC_RETENCAO_DIAS dias.
 #
 # PROVISIONAMENTO EM PRODUCAO (10.100.80.10):
-#   sudo mkdir -p /mnt/hdd/sync_nas
-#   sudo chown 1000:1000 /mnt/hdd/sync_nas
-#   sudo chmod 755 /mnt/hdd/sync_nas
+#   sudo mkdir -p /mnt/hdd/vault/sync_nas
+#   sudo chown 1000:1000 /mnt/hdd/vault/sync_nas
+#   sudo chmod 770 /mnt/hdd/vault/sync_nas
+# IMPORTANTE: a pasta DEVE ficar dentro de /mnt/hdd/vault (XFS, /dev/sdb1, ~3 TB),
+# MESMO filesystem dos ZIPs em /mnt/hdd/vault/zips — assim o move do ZIP e
+# instantaneo (os.rename). /mnt/hdd (sem /vault) e o root LVM de ~28 GB; usar
+# /mnt/hdd/sync_nas la encheria o root e faria copia lenta entre filesystems.
 # Em DEV (WSL) basta apontar NAS_SYNC_DIR no .env para uma pasta local
 # gravavel (ex: ./dados/sync_nas).
 _nas_sync_dir_env = os.getenv("NAS_SYNC_DIR", "")
-NAS_SYNC_DIR = Path(_nas_sync_dir_env) if _nas_sync_dir_env else Path("/mnt/hdd/sync_nas")
+NAS_SYNC_DIR = Path(_nas_sync_dir_env) if _nas_sync_dir_env else Path("/mnt/hdd/vault/sync_nas")
 
 # Cria a pasta apenas se ja for possivel (DEV com path local), sem quebrar o
 # import quando o caminho padrao /mnt/hdd nao existe em ambientes que ainda

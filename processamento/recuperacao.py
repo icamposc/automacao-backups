@@ -75,6 +75,12 @@ def recuperar_backups_interrompidos() -> int:
     # então deve rodar APÓS esta marcação para incluir a falha atual no total.
     marcar_backups_interrompidos()
 
+    # Captura lista resumida dos tickets afetados (usada na notificacao consolidada).
+    tickets_afetados = [
+        {"ticket_id": b.get("ticket_id"), "email": b.get("email")}
+        for b in interrompidos
+    ]
+
     reagendados = 0
     bloqueados = 0
     for backup in interrompidos:
@@ -110,6 +116,20 @@ def recuperar_backups_interrompidos() -> int:
         f"Recuperação concluída — {reagendados}/{len(interrompidos)} reagendado(s), "
         f"{bloqueados} bloqueado(s) pela blacklist."
     )
+
+    # Alerta consolidado no chat de LOGS — evento CRITICO (restart com backups ativos).
+    # Falhas no envio sao silenciadas para nao afetar o fluxo de recuperacao.
+    try:
+        from servicos.google_chat import notificar_restart_servidor
+        notificar_restart_servidor(
+            total_interrompidos=len(interrompidos),
+            reagendados=reagendados,
+            bloqueados=bloqueados,
+            tickets_afetados=tickets_afetados,
+        )
+    except Exception as erro:
+        logger.warning(f"Falha ao enviar alerta de restart ao chat de Logs: {erro}")
+
     return reagendados
 
 

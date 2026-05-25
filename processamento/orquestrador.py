@@ -231,7 +231,7 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
     sha256_zip = None
     _backup_concluido = False
     # Flag usada pelo `finally`: quando o destino e NAS, o ZIP permanece em
-    # /mnt/hdd/sync_nas/ para o NAS coletar e NAO deve ser apagado pelo
+    # /mnt/hdd/vault/sync_nas/ para o NAS coletar e NAO deve ser apagado pelo
     # limpar_arquivo_zip da limpeza imediata. A limpeza desse ZIP e feita
     # depois pela limpar_zips_sincronizados (apos NAS_SYNC_RETENCAO_DIAS).
     _manter_zip_local = False
@@ -461,7 +461,7 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         # vs Drive (fallback — fluxo classico Etapas 7 e 8).
         # ─────────────────────────────────────────────────────────
         if destino_usado == "nas":
-            # Worker terminou. O ZIP esta em /mnt/hdd/sync_nas/ aguardando o
+            # Worker terminou. O ZIP esta em /mnt/hdd/vault/sync_nas/ aguardando o
             # NAS Synology coletar (janela de 23h, responsabilidade externa).
             # Apos isso, o monitor `processamento.finalizacao_nas` fechara o
             # ticket no Jira, excluira a conta Workspace (se aplicavel) e
