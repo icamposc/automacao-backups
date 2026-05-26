@@ -5,8 +5,9 @@ Monitor de Finalizacao NAS — Automacao de Backups
 Versao: 1.0.0
 Data:   2026-05-22
 Descricao: A cada 30 min varre backups em status 'aguardando_nas'
-           que ja passaram da janela de 23h (tempo dado ao NAS Synology
-           para coletar o ZIP da pasta /mnt/hdd/vault/sync_nas/) e executa
+           que ja passaram da janela de espera (default 6h, configuravel
+           via NAS_SYNC_HORAS_ESPERA — tempo dado ao NAS Synology para
+           coletar o ZIP da pasta /mnt/hdd/vault/sync_nas/) e executa
            incondicionalmente o ciclo de encerramento:
 
            - finalizar_backup(status='concluido')
@@ -19,14 +20,15 @@ Descricao: A cada 30 min varre backups em status 'aguardando_nas'
               local apos NAS_SYNC_RETENCAO_DIAS dias)
 
            NAO ha verificacao externa (Drive/webhook). O servidor
-           confia que o NAS coletou em ate 23h, conforme acordado
-           com o cliente.
+           confia que o NAS coletou dentro da janela de espera,
+           conforme acordado com o cliente.
 ============================================================
 Historico:
   1.0.0 (2026-05-22) — Versao inicial.
 ============================================================
 """
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -36,12 +38,13 @@ from utils.logger import obter_logger
 logger = obter_logger("finalizacao_nas")
 
 # Janela dada ao NAS para coletar o ZIP da sync_nas antes do servidor
-# considerar consolidado e encerrar o ciclo.
-_HORAS_ESPERA = 23
+# considerar consolidado e encerrar o ciclo. Configuravel via env
+# NAS_SYNC_HORAS_ESPERA (default 6h) para ajuste sem rebuild.
+_HORAS_ESPERA = int(os.getenv("NAS_SYNC_HORAS_ESPERA", "6"))
 
 # Intervalo entre varreduras do banco em busca de backups maduros.
-# 30 min e suficiente para que a latencia entre 23h e a finalizacao real
-# fique no maximo em ~30 min (aceitavel para o caso de uso).
+# 30 min e suficiente para que a latencia entre a janela e a finalizacao
+# real fique no maximo em ~30 min (aceitavel para o caso de uso).
 _INTERVALO_VARREDURA = 30 * 60
 
 # Pequena espera no boot para estabilizacao de banco/redis/worker.
@@ -49,7 +52,7 @@ _ESPERA_INICIAL = 60
 
 
 def finalizar_backups_pendentes() -> dict:
-    """Varre backups com tempo > 23h em aguardando_nas e encerra o ciclo.
+    """Varre backups maduros (> _HORAS_ESPERA) em aguardando_nas e encerra o ciclo.
 
     Cada finalizacao e idempotente: se ja foi finalizado por uma execucao
     anterior, o status ja sera 'concluido' e nao aparecera na lista

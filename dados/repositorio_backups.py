@@ -165,7 +165,7 @@ def marcar_aguardando_nas(email: str, link_local: str) -> None:
     logger.info(f"Backup #{backup_id} ({email}) -> aguardando_nas (link={link_local})")
 
 
-def listar_prontos_para_finalizar(horas: int = 23) -> list:
+def listar_prontos_para_finalizar(horas: int = 6) -> list:
     """Lista backups em aguardando_nas que ja passaram do prazo de espera.
 
     Usado pelo monitor de finalizacao_nas para encerrar tickets, excluir contas
