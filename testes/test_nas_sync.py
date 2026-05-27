@@ -2,11 +2,10 @@
 Testes do modulo servicos/nas_sync.py + integracao com a limpeza.
 
 Verifica:
-- disponibilizar_para_nas() move o ZIP e cria marker .ready
+- disponibilizar_para_nas() move o ZIP (sem criar markers)
 - formato de retorno compativel com drive_upload (chave webViewLink)
 - ErroNasSync quando o NAS_SYNC_DIR nao e gravavel
-- limpar_zips_sincronizados() respeita NAS_SYNC_RETENCAO_DIAS
-- limpar_zips_sincronizados() emite warning para .ready muito antigos
+- limpar_zips_sincronizados() respeita NAS_SYNC_RETENCAO_HORAS
 """
 
 import os
@@ -23,19 +22,19 @@ def sync_dir_temp(tmp_path, monkeypatch):
     pasta.mkdir()
     # Reimporta as configuracoes apos sobrescrever o env para garantir efeito.
     monkeypatch.setenv("NAS_SYNC_DIR", str(pasta))
-    monkeypatch.setenv("NAS_SYNC_RETENCAO_DIAS", "7")
+    monkeypatch.setenv("NAS_SYNC_RETENCAO_HORAS", "6")
 
     # Como configuracoes.py ja foi importado (modulo cacheado), patch direto na constante.
     import config.configuracoes as cfg
     monkeypatch.setattr(cfg, "NAS_SYNC_DIR", pasta)
-    monkeypatch.setattr(cfg, "NAS_SYNC_RETENCAO_DIAS", 7)
+    monkeypatch.setattr(cfg, "NAS_SYNC_RETENCAO_HORAS", 6)
 
     # Patch nos modulos que ja importaram a constante por referencia
     import servicos.nas_sync as nas_mod
     monkeypatch.setattr(nas_mod, "NAS_SYNC_DIR", pasta)
     import processamento.limpeza as limp_mod
     monkeypatch.setattr(limp_mod, "NAS_SYNC_DIR", pasta)
-    monkeypatch.setattr(limp_mod, "NAS_SYNC_RETENCAO_DIAS", 7)
+    monkeypatch.setattr(limp_mod, "NAS_SYNC_RETENCAO_HORAS", 6)
 
     return pasta
 
@@ -49,26 +48,25 @@ def zip_dummy(tmp_path):
 
 
 class TestDisponibilizarParaNas:
-    def test_move_arquivo_e_cria_marker_ready(self, sync_dir_temp, zip_dummy):
+    def test_move_arquivo_sem_marker(self, sync_dir_temp, zip_dummy):
         from servicos.nas_sync import disponibilizar_para_nas
 
-        resultado = disponibilizar_para_nas(
+        disponibilizar_para_nas(
             zip_dummy, sha256="abc123def456" * 5, on_progresso=None
         )
 
         # Arquivo original nao deve mais existir (foi MOVIDO)
         assert not zip_dummy.exists(), "ZIP original deveria ter sido movido"
 
-        # Estrutura criada: NAS_SYNC_DIR/<email>/<arquivo>.zip + .ready
+        # Estrutura criada: NAS_SYNC_DIR/<email>/<arquivo>.zip (sem markers)
         destino_email = sync_dir_temp / "joao@empresa.com"
         destino_zip = destino_email / "joao@empresa.com_20260520_134430.zip"
-        marker = destino_email / "joao@empresa.com_20260520_134430.zip.ready"
 
         assert destino_zip.exists(), f"ZIP nao chegou ao destino: {destino_zip}"
-        assert marker.exists(), f"Marker .ready nao foi criado: {marker}"
 
-        # Conteudo do marker = SHA256
-        assert marker.read_text(encoding="utf-8") == "abc123def456" * 5
+        # Nenhum marker deve ser criado ao lado do ZIP
+        assert not (destino_email / f"{destino_zip.name}.ready").exists()
+        assert not (destino_email / f"{destino_zip.name}.uploaded").exists()
 
     def test_retorno_compativel_com_drive_upload(self, sync_dir_temp, zip_dummy):
         from servicos.nas_sync import disponibilizar_para_nas
@@ -116,7 +114,7 @@ class TestDisponibilizarParaNas:
 
 
 class TestLimpezaZipsSincronizados:
-    def test_apaga_zips_com_marker_uploaded_antigo(self, sync_dir_temp):
+    def test_apaga_zips_antigos(self, sync_dir_temp):
         from processamento.limpeza import limpar_zips_sincronizados
 
         pasta_email = sync_dir_temp / "fulano@empresa.com"
@@ -124,18 +122,14 @@ class TestLimpezaZipsSincronizados:
 
         zip_velho = pasta_email / "fulano@empresa.com_20260101_120000.zip"
         zip_velho.write_bytes(b"a" * 4096)
-        marker = pasta_email / "fulano@empresa.com_20260101_120000.zip.uploaded"
-        marker.write_text("sha-fulano", encoding="utf-8")
 
-        # Backdate ambos para 10 dias atras (> retencao=7)
+        # Backdate para 10 dias atras (> retencao=7)
         antigo = (datetime.now() - timedelta(days=10)).timestamp()
         os.utime(zip_velho, (antigo, antigo))
-        os.utime(marker, (antigo, antigo))
 
         limpar_zips_sincronizados()
 
         assert not zip_velho.exists(), "ZIP antigo deveria ter sido apagado"
-        assert not marker.exists(), "Marker .uploaded antigo deveria ter sido apagado"
 
     def test_preserva_zips_recentes(self, sync_dir_temp):
         from processamento.limpeza import limpar_zips_sincronizados
@@ -145,14 +139,11 @@ class TestLimpezaZipsSincronizados:
 
         zip_novo = pasta_email / "novo@empresa.com_20260520_120000.zip"
         zip_novo.write_bytes(b"b" * 4096)
-        marker = pasta_email / "novo@empresa.com_20260520_120000.zip.uploaded"
-        marker.write_text("sha-novo", encoding="utf-8")
         # mtime de hoje (dentro da retencao)
 
         limpar_zips_sincronizados()
 
         assert zip_novo.exists()
-        assert marker.exists()
 
     def test_noop_quando_nas_sync_dir_nao_existe(self, tmp_path, monkeypatch):
         from processamento.limpeza import limpar_zips_sincronizados
@@ -161,7 +152,7 @@ class TestLimpezaZipsSincronizados:
         # Aponta para pasta inexistente
         inexistente = tmp_path / "nao_existe"
         monkeypatch.setattr(limp_mod, "NAS_SYNC_DIR", inexistente)
-        monkeypatch.setattr(limp_mod, "NAS_SYNC_RETENCAO_DIAS", 7)
+        monkeypatch.setattr(limp_mod, "NAS_SYNC_RETENCAO_HORAS", 6)
 
         # Nao deve levantar
         limpar_zips_sincronizados()

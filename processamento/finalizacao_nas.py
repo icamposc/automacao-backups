@@ -15,9 +15,8 @@ Descricao: A cada 30 min varre backups em status 'aguardando_nas'
            - transicionar_resolvido(ticket_id)
            - deletar_conta no Workspace (se deletar_conta=True)
            - notificar Google Chat operacional
-           - promover marker <X>.zip.ready -> <X>.zip.uploaded
-             (libera a limpeza_zips_sincronizados a apagar o ZIP
-              local apos NAS_SYNC_RETENCAO_DIAS dias)
+           - apagar o ZIP local de NAS_SYNC_DIR (o NAS ja teve a janela
+             de espera para coletar; a copia local fica redundante)
 
            NAO ha verificacao externa (Drive/webhook). O servidor
            confia que o NAS coletou dentro da janela de espera,
@@ -122,8 +121,9 @@ def finalizar_backups_pendentes() -> dict:
                     except Exception:
                         pass  # nao quebra o ciclo
 
-            # 5) Promove marker .ready -> .uploaded (libera limpeza posterior)
-            _promover_marker(link)
+            # 5) Apaga o ZIP local — a janela de espera ja passou, o NAS
+            #    teve tempo de coletar e a copia local so ocupa disco.
+            _apagar_zip_local(link)
 
             finalizados += 1
             logger.info(f"Finalizado #{b['id']} — {email} / {ticket}")
@@ -137,32 +137,28 @@ def finalizar_backups_pendentes() -> dict:
     return {"finalizados": finalizados}
 
 
-def _promover_marker(link_local: str) -> None:
-    """Renomeia <X>.zip.ready -> <X>.zip.uploaded para liberar a limpeza.
+def _apagar_zip_local(link_local: str) -> None:
+    """Apaga o ZIP local em NAS_SYNC_DIR apos a janela de espera do NAS.
 
-    O link guardado e do formato 'nas:/mnt/hdd/vault/sync_nas/...zip'. Strip do
-    prefixo 'nas:' antes de mexer no filesystem. Se o marker nao existir
-    (ja promovido ou nunca criado), apenas loga e segue.
+    O link guardado tem o formato 'nas:/mnt/hdd/vault/sync_nas/...zip'. So apaga
+    quando o destino foi o NAS (prefixo 'nas:') — no fallback Drive o link e uma
+    URL https e nada deve ser apagado aqui. Erros sao logados e nao quebram o
+    ciclo; a varredura limpar_zips_sincronizados serve de safety-net.
     """
-    if not link_local:
+    if not link_local or not link_local.startswith("nas:"):
         return
-    caminho = link_local[4:] if link_local.startswith("nas:") else link_local
-    zip_path = Path(caminho)
-    marker_ready = Path(str(zip_path) + ".ready")
-    marker_uploaded = Path(str(zip_path) + ".uploaded")
+    zip_path = Path(link_local[4:])
     try:
-        if marker_ready.exists():
-            marker_ready.rename(marker_uploaded)
-            logger.debug(f"Marker promovido: {marker_ready.name} -> {marker_uploaded.name}")
-        elif marker_uploaded.exists():
-            logger.debug(f"Marker ja estava promovido: {marker_uploaded.name}")
-        else:
-            logger.warning(
-                f"Nenhum marker encontrado para {zip_path.name} — "
-                f"limpeza_zips_sincronizados nao vai apagar o ZIP."
+        if zip_path.exists():
+            tamanho_mb = zip_path.stat().st_size / (1024 * 1024)
+            zip_path.unlink()
+            logger.info(
+                f"ZIP local apagado apos janela do NAS: {zip_path.name} ({tamanho_mb:.1f} MB)"
             )
+        else:
+            logger.debug(f"ZIP local ja nao existe (apagado antes?): {zip_path}")
     except OSError as erro:
-        logger.error(f"Falha ao promover marker {marker_ready}: {erro}")
+        logger.error(f"Falha ao apagar ZIP local {zip_path}: {erro}")
 
 
 # ── Monitor periodico (thread daemon) ───────────────────────────────────

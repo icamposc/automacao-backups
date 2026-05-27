@@ -6,13 +6,11 @@ Verifica:
 - Backup finaliza apos 23h: status=concluido, comentar_sucesso, transicionar,
   chat de sucesso
 - Quando deletar_conta=True chama servicos.conta_exclusao.deletar_conta
-- Marker <X>.zip.ready e promovido para <X>.zip.uploaded
 - Idempotencia: segunda execucao com mesmos pendentes vira no-op
 - Falha em um backup nao impede processamento dos outros
 """
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -144,19 +142,17 @@ class TestFinalizacaoNas:
 
         m_del.assert_called_once_with("del@empresa.com")
 
-    def test_marker_ready_promovido_para_uploaded(self, tmp_path):
+    def test_apaga_zip_local_na_finalizacao(self, tmp_path):
         from processamento.finalizacao_nas import finalizar_backups_pendentes
 
-        zip_path = tmp_path / "marker@empresa.com_Y.zip"
-        zip_path.write_bytes(b"z")
-        marker_ready = Path(str(zip_path) + ".ready")
-        marker_ready.write_text("sha-fake")
+        zip_path = tmp_path / "apaga@empresa.com_Z.zip"
+        zip_path.write_bytes(b"z" * 100)
 
         _criar_backup_aguardando_nas(
-            email="marker@empresa.com",
-            ticket_id="TICK-MK",
+            email="apaga@empresa.com",
+            ticket_id="TICK-ZIP",
             caminho_zip=f"nas:{zip_path}",
-            horas_atras=25,
+            horas_atras=7,  # acima da janela de 6h
         )
 
         ctx = _patches_jira_chat_conta()
@@ -166,9 +162,19 @@ class TestFinalizacaoNas:
              ctx["chat_sucesso"]:
             finalizar_backups_pendentes()
 
-        assert not marker_ready.exists(), "marker .ready deveria ter sido renomeado"
-        marker_uploaded = Path(str(zip_path) + ".uploaded")
-        assert marker_uploaded.exists(), "marker .uploaded deveria existir"
+        assert not zip_path.exists(), "ZIP local deveria ter sido apagado na finalizacao"
+
+    def test_nao_apaga_zip_no_fallback_drive(self, tmp_path):
+        """Quando o destino foi o Drive (link https), nada e apagado do disco."""
+        from processamento.finalizacao_nas import _apagar_zip_local
+
+        zip_path = tmp_path / "drive@empresa.com.zip"
+        zip_path.write_bytes(b"x")
+
+        # link de fallback Drive nao comeca com 'nas:' -> no-op
+        _apagar_zip_local("https://drive.google.com/file/d/abc")
+
+        assert zip_path.exists(), "ZIP nao deveria ser tocado no fluxo Drive"
 
     def test_idempotente_segunda_execucao(self, tmp_path):
         from processamento.finalizacao_nas import finalizar_backups_pendentes

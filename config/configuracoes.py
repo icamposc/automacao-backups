@@ -98,10 +98,11 @@ DRIVE_PASTA_DESTINO_ID = _obter_variavel("DRIVE_PASTA_DESTINO_ID")
 # ============================================================
 # NAS Synology — Destino primário do backup (pull pelo NAS)
 # ============================================================
-# O servidor MOVE o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip e
-# cria um marker .ready ao lado. O NAS (via task agendada) varre essa pasta,
-# copia para o storage final e renomeia .ready -> .uploaded sinalizando ao
-# servidor que pode apagar o ZIP local depois de NAS_SYNC_RETENCAO_DIAS dias.
+# O servidor MOVE o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip.
+# O NAS Synology sincroniza essa pasta por conta propria (sem markers). O ZIP
+# local e apagado na finalizacao (apos a janela NAS_SYNC_HORAS_ESPERA); a
+# varredura limpar_zips_sincronizados (boot) cobre orfaos com mais de
+# NAS_SYNC_RETENCAO_HORAS, baseada na idade do proprio .zip.
 #
 # PROVISIONAMENTO EM PRODUCAO (10.100.80.10):
 #   sudo mkdir -p /mnt/hdd/vault/sync_nas
@@ -128,8 +129,8 @@ except (PermissionError, FileNotFoundError):
     # se ainda falhar la, o fallback Drive captura via ErroNasSync.
     pass
 
-NAS_SYNC_RETENCAO_DIAS = int(
-    _obter_variavel("NAS_SYNC_RETENCAO_DIAS", obrigatoria=False, padrao="7")
+NAS_SYNC_RETENCAO_HORAS = int(
+    _obter_variavel("NAS_SYNC_RETENCAO_HORAS", obrigatoria=False, padrao="6")
 )
 
 # ============================================================

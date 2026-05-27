@@ -232,8 +232,9 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
     _backup_concluido = False
     # Flag usada pelo `finally`: quando o destino e NAS, o ZIP permanece em
     # /mnt/hdd/vault/sync_nas/ para o NAS coletar e NAO deve ser apagado pelo
-    # limpar_arquivo_zip da limpeza imediata. A limpeza desse ZIP e feita
-    # depois pela limpar_zips_sincronizados (apos NAS_SYNC_RETENCAO_DIAS).
+    # limpar_arquivo_zip da limpeza imediata. Esse ZIP e apagado depois na
+    # finalizacao (apos a janela NAS_SYNC_HORAS_ESPERA); a varredura
+    # limpar_zips_sincronizados (NAS_SYNC_RETENCAO_HORAS) e safety-net.
     _manter_zip_local = False
 
     try:
@@ -411,7 +412,7 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         # ETAPA 6: Disponibilizar .zip para o NAS Synology (com fallback Drive)
         # ─────────────────────────────────────────────────────────
         # Estrategia: o NAS faz pull do disco local (montado nele via SMB/NFS).
-        # O servidor apenas MOVE o ZIP para NAS_SYNC_DIR e cria um marker .ready.
+        # O servidor apenas MOVE o ZIP para NAS_SYNC_DIR; o NAS sincroniza sozinho.
         # Se isso falhar (disco cheio, permissao), cai para upload direto no Drive.
         logger.info("[ETAPA 6/8] Disponibilizando .zip para o NAS Synology...")
         atualizar_etapa(email, 6, STATUS_EM_ANDAMENTO)
@@ -457,22 +458,21 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
         limpar_arquivos_temporarios(pasta_colaborador)
 
         # ─────────────────────────────────────────────────────────
-        # Fluxo bifurca apos a Etapa 6: NAS (aguarda 23h e monitor finaliza)
+        # Fluxo bifurca apos a Etapa 6: NAS (aguarda 6h e monitor finaliza)
         # vs Drive (fallback — fluxo classico Etapas 7 e 8).
         # ─────────────────────────────────────────────────────────
         if destino_usado == "nas":
             # Worker terminou. O ZIP esta em /mnt/hdd/vault/sync_nas/ aguardando o
-            # NAS Synology coletar (janela de 23h, responsabilidade externa).
+            # NAS Synology coletar (janela de 6h, responsabilidade externa).
             # Apos isso, o monitor `processamento.finalizacao_nas` fechara o
             # ticket no Jira, excluira a conta Workspace (se aplicavel) e
-            # promovera o marker .ready -> .uploaded para a limpeza apagar
-            # o ZIP local depois de NAS_SYNC_RETENCAO_DIAS dias.
+            # apagara o ZIP local (a copia ja foi sincronizada pelo NAS).
             from dados.repositorio_backups import marcar_aguardando_nas
             marcar_aguardando_nas(email, link_drive)
             comentar_progresso(
                 ticket_id,
                 "Backup compactado e disponibilizado para coleta pelo NAS Synology. "
-                "Encerramento automatico do chamado em ate 23 horas."
+                "Encerramento automatico do chamado em ate 6 horas."
             )
             # Etapas 7 e 8 ficam como concluidas no rastreador (visivel no dashboard).
             # O ciclo final (Jira + exclusao + chat) e atribuido ao monitor.
@@ -586,8 +586,8 @@ def executar_backup_direto(email: str, ticket_id: str, nome: str = None, deletar
                 limpar_arquivo_zip(caminho_zip)
             else:
                 logger.info(
-                    "ZIP preservado em sync_nas — sera apagado por "
-                    "limpar_zips_sincronizados apos NAS_SYNC_RETENCAO_DIAS."
+                    "ZIP preservado em sync_nas — sera apagado na finalizacao "
+                    "apos a janela de espera do NAS."
                 )
         else:
             logger.info("Backup não concluído — arquivos preservados para reprocessamento.")

@@ -51,7 +51,8 @@ recuperar_backups_interrompidos()
 # limpeza de logs pode demorar — executa em background para não atrasar o startup
 threading.Thread(target=limpar_logs_antigos, daemon=True).start()
 
-# limpeza dos ZIPs ja sincronizados pelo NAS (markers .uploaded antigos)
+# safety-net: apaga ZIPs orfaos em sync_nas com mais de NAS_SYNC_RETENCAO_HORAS
+# (a exclusao normal acontece na finalizacao_nas, apos a janela de espera)
 threading.Thread(target=limpar_zips_sincronizados, daemon=True).start()
 
 # Monitor de saúde — thread daemon que alerta no Google Chat de LOGS quando
@@ -59,7 +60,8 @@ threading.Thread(target=limpar_zips_sincronizados, daemon=True).start()
 iniciar_monitor_saude()
 
 # Monitor de finalizacao NAS — thread daemon que, a cada 30 min, varre backups
-# em status 'aguardando_nas' ha mais de 23h e fecha o ciclo (Jira + conta + chat).
+# em status 'aguardando_nas' ha mais de NAS_SYNC_HORAS_ESPERA (6h) e fecha o
+# ciclo (Jira + conta + chat) e apaga o ZIP local.
 iniciar_monitor_finalizacao_nas()
 
 

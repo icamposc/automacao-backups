@@ -18,27 +18,28 @@ montando a pasta do servidor via SMB. Isso elimina o gargalo da quota de
 ```
 ┌─ SERVIDOR (10.100.80.10) ────────────────────┐      ┌─ NAS Synology ──────────────┐
 │ Backup finaliza →                             │      │ Tarefa agendada (a cada Xh): │
-│   MOVE → /mnt/hdd/vault/sync_nas/<email>/X.zip      │      │  1. monta //10.100.80.10/    │
-│   cria  → /mnt/hdd/vault/sync_nas/<email>/X.zip.ready│◄─SMB─│     sync_nas                 │
-│          (conteúdo = SHA256 do ZIP)           │ :445 │  2. copia *.ready + .zip     │
-│ status do backup = "aguardando_nas"           │      │  3. valida SHA256            │
-│                                               │      │  4. renomeia .ready→.uploaded│
-│ limpeza.py: vê .uploaded → após 7 dias apaga  │      │     (precisa de ESCRITA)     │
-│   ZIP+marker; alerta .ready "stale"           │      └──────────────────────────────┘
-│ finalizacao_nas.py: após 23h fecha ticket     │
-│   Jira + deleta conta Workspace               │
+│   MOVE → /mnt/hdd/vault/sync_nas/<email>/X.zip│◄─SMB─│  1. monta //10.100.80.10/    │
+│ status do backup = "aguardando_nas"           │ :445 │     sync_nas                 │
+│                                               │      │  2. sincroniza os *.zip      │
+│ finalizacao_nas.py: após 6h fecha ticket      │      │     para o storage do NAS    │
+│   Jira + deleta conta + APAGA o ZIP local     │      └──────────────────────────────┘
+│ limpeza.py (boot): safety-net — apaga ZIPs    │
+│   órfãos com mais de NAS_SYNC_RETENCAO_HORAS  │
 └───────────────────────────────────────────────┘
 ```
 
-**Handshake por marcadores** (exigido por `processamento/limpeza.py`):
+**Sem marcadores.** O servidor apenas move o `.zip` para a pasta; não cria
+nem renomeia arquivos de controle. O NAS sincroniza a pasta por conta própria.
+A exclusão da cópia local é responsabilidade do servidor:
 
-| Marcador | Quem cria | Significado |
-|---|---|---|
-| `X.zip.ready` | servidor | ZIP pronto para coleta; conteúdo = SHA256 esperado |
-| `X.zip.uploaded` | **NAS** | NAS copiou e validou; servidor pode limpar após 7 dias |
+| Quando | O que apaga o ZIP local |
+|---|---|
+| Após a janela `NAS_SYNC_HORAS_ESPERA` (6h) | `finalizacao_nas.py`, ao fechar o ciclo do backup |
+| No boot do servidor (safety-net) | `limpeza.py`, para ZIPs órfãos com mais de `NAS_SYNC_RETENCAO_HORAS` (6h) |
 
-> ⚠️ O usuário SMB do NAS **precisa de permissão de escrita** no share,
-> pois é ele quem renomeia `.ready` → `.uploaded`.
+> O usuário SMB do NAS só precisa de **leitura** para sincronizar os `.zip`
+> (não há mais markers para renomear). O share permanece com escrita habilitada
+> por conveniência, mas ela não é mais exigida pelo fluxo.
 
 ---
 
@@ -73,7 +74,7 @@ sudo smbpasswd -e infra      # habilita o usuário
 ```
 
 > Como `infra` já é dono de `/mnt/hdd/vault/sync_nas` (UID 1000), não há ajuste
-> extra de permissão — ele lê, escreve e renomeia os markers normalmente.
+> extra de permissão — ele lê e sincroniza os `.zip` normalmente.
 
 ### 2.4. Configurar o compartilhamento
 
@@ -146,26 +147,26 @@ chmod +x /volume1/Backups-Workspace/coletar_backups.sh
 
 - **Usuário:** `root` (necessário para `mount -t cifs`).
 - **Agendamento:** sugerido a cada **1–2 horas** (a janela de finalização do
-  servidor é de 23h — ver `finalizacao_nas.py` — então essa folga é ampla).
-- **Comando:**
+  servidor é de 6h — ver `finalizacao_nas.py` — então essa folga é ampla).
+- **Comando:** sincronizar o conteúdo da pasta montada para o storage do NAS,
+  por exemplo:
   ```bash
-  /volume1/Backups-Workspace/coletar_backups.sh
+  rsync -a /mnt/sync_nas/ /volume1/Backups-Workspace/
   ```
+
+> ⚠️ O servidor **não usa mais markers** `.ready`/`.uploaded`. A coleta agora é
+> uma simples sincronização dos arquivos `.zip` da pasta. O antigo script
+> `coletar_backups.sh` (validação de SHA256 + renomeação de marker) **não é mais
+> necessário** — basta o NAS espelhar a pasta enquanto os `.zip` existirem.
+> Lembre-se: o servidor apaga o ZIP local **6h** após disponibilizá-lo, então o
+> agendamento do NAS precisa rodar dentro dessa janela.
 
 ### 3.4. Teste manual
 
 ```bash
-# via SSH no NAS:
-/volume1/Backups-Workspace/coletar_backups.sh
-tail -n 30 /volume1/Backups-Workspace/coleta.log
-```
-
-O log deve mostrar `Coleta finalizada: total=N ok=N falhas=0`. Confirme que,
-no servidor, os markers viraram `.uploaded`:
-
-```bash
-# no servidor:
-ls -la /mnt/hdd/vault/sync_nas/*/
+# via SSH no NAS, após montar a pasta:
+rsync -a --dry-run /mnt/sync_nas/ /volume1/Backups-Workspace/
+ls -la /volume1/Backups-Workspace/*/
 ```
 
 ---
@@ -173,14 +174,14 @@ ls -la /mnt/hdd/vault/sync_nas/*/
 ## 4. Validação ponta a ponta
 
 1. **Servidor:** processar um backup pequeno → confirmar que aparece
-   `/mnt/hdd/vault/sync_nas/<email>/X.zip` + `X.zip.ready` e que o status do
-   registro é `aguardando_nas`.
-2. **NAS:** rodar o script (ou aguardar o agendamento) → confirmar o ZIP em
-   `/volume1/Backups-Workspace/<email>/` e o marcador virando `.uploaded`.
-3. **Servidor:** após 23h, `finalizacao_nas.py` fecha o ticket no Jira e
-   (quando aplicável) exclui a conta Workspace.
-4. **Servidor:** após `NAS_SYNC_RETENCAO_DIAS` (padrão 7), `limpeza.py`
-   apaga o ZIP local e o marcador `.uploaded`.
+   `/mnt/hdd/vault/sync_nas/<email>/X.zip` e que o status do registro é
+   `aguardando_nas`.
+2. **NAS:** rodar a sincronização (ou aguardar o agendamento) → confirmar o ZIP
+   em `/volume1/Backups-Workspace/<email>/`.
+3. **Servidor:** após 6h, `finalizacao_nas.py` fecha o ticket no Jira, (quando
+   aplicável) exclui a conta Workspace e **apaga o ZIP local**.
+4. **Servidor:** ZIPs órfãos (sem registro no banco) são apagados no boot pela
+   `limpeza.py` após `NAS_SYNC_RETENCAO_HORAS` (padrão 6).
 
 ## 5. Solução de problemas
 
@@ -188,9 +189,8 @@ ls -la /mnt/hdd/vault/sync_nas/*/
 |---|---|---|
 | `mount error(13)` no NAS | usuário/senha SMB errados ou usuário desabilitado | revisar `.smbcred` e `smbpasswd -e infra` |
 | `mount error(115)`/timeout | firewall bloqueando 445 ou `smbd` parado | revisar regra do firewall e `systemctl status smbd` |
-| markers `.ready` antigos acumulando | NAS não está coletando | ver alerta de "stale" nos logs do servidor (`limpeza.py`); revisar a tarefa agendada do DSM |
-| SHA256 divergente no log | cópia corrompida/incompleta | o script descarta a cópia e mantém `.ready`; será recoletado |
-| NAS copia mas não renomeia `.ready` | usuário SMB sem escrita | revisar `valid users`/`force user` e permissões da pasta (seção 2.3) |
+| ZIP some antes de o NAS coletar | agendamento do NAS mais lento que a janela de 6h | aumentar a frequência da tarefa no DSM ou subir `NAS_SYNC_HORAS_ESPERA` no `.env` |
+| ZIPs antigos acumulando na pasta | NAS não está sincronizando | revisar a tarefa agendada do DSM e a montagem SMB |
 
 ---
 

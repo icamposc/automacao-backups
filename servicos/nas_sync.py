@@ -4,13 +4,9 @@ Modulo NAS Synology — Disponibilizacao de Backups
 ============================================================
 Versao: 1.0.0
 Data: 2026-05-22
-Descricao: Move o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip
-           e cria um marker <arquivo>.zip.ready ao lado, sinalizando ao
-           NAS que pode coletar.
-
-           Quando o NAS conclui a copia, ele renomeia o marker para
-           <arquivo>.zip.uploaded — isso e auditado pela limpeza
-           periodica em processamento/limpeza.py.
+Descricao: Move o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip.
+           O NAS Synology sincroniza essa pasta por conta propria — o
+           servidor nao cria markers nem renomeia arquivos.
 
            NAO usa rede: a transferencia para o NAS e feita pelo proprio
            Synology lendo o disco do servidor (montado via SMB/NFS no NAS).
@@ -51,7 +47,7 @@ def disponibilizar_para_nas(
     sha256: str = None,
     on_progresso: callable = None,
 ) -> dict:
-    """Move o ZIP para NAS_SYNC_DIR e cria um marker .ready para o NAS coletar.
+    """Move o ZIP para NAS_SYNC_DIR para o NAS Synology coletar.
 
     Mantem a mesma assinatura de servicos/drive_upload.fazer_upload para
     permitir fallback transparente no orquestrador.
@@ -62,7 +58,8 @@ def disponibilizar_para_nas(
     Args:
         caminho_arquivo: Caminho local do ZIP finalizado.
         nome_arquivo:    Nome a ser usado no destino. Default = nome do arquivo.
-        sha256:          Hash SHA256. Gravado em <arquivo>.zip.sha256 ao lado.
+        sha256:          Hash SHA256 do ZIP. Mantido na assinatura por
+                         compatibilidade com drive_upload; nao e gravado em disco.
         on_progresso:    Callback opcional chamado com 0 e 100 (operacao e instantanea).
 
     Returns:
@@ -88,7 +85,6 @@ def disponibilizar_para_nas(
 
     pasta_destino = _pasta_destino_email(email)
     destino_zip = pasta_destino / nome
-    destino_ready = pasta_destino / f"{nome}.ready"
 
     logger.info(
         f"Disponibilizando para NAS: {nome} ({tamanho_mb:.1f} MB) -> {destino_zip}"
@@ -107,11 +103,6 @@ def disponibilizar_para_nas(
         # (instantaneo), e cai para copy+delete entre filesystems diferentes.
         shutil.move(str(caminho_arquivo), str(destino_zip))
 
-        # Marker .ready criado APOS o move bem-sucedido — assim o NAS nunca enxerga
-        # um arquivo half-written. Conteudo: SHA256 (se disponivel) para o NAS validar.
-        conteudo_marker = sha256 or ""
-        destino_ready.write_text(conteudo_marker, encoding="utf-8")
-
     except OSError as erro:
         # Mantem caminho_arquivo intacto se o move falhou no meio
         logger.error(f"Falha ao disponibilizar para NAS: {erro}")
@@ -126,7 +117,7 @@ def disponibilizar_para_nas(
             pass
 
     pseudo_uri = f"nas:{destino_zip}"
-    logger.info(f"Disponibilizado no NAS — {nome} | marker .ready criado | link={pseudo_uri}")
+    logger.info(f"Disponibilizado no NAS — {nome} | link={pseudo_uri}")
 
     return {
         "id": str(destino_zip),
