@@ -176,6 +176,55 @@ def api_iniciar_manual():
     }), 200
 
 
+@bp.route("/api/backups/refazer", methods=["POST"])
+def api_refazer():
+    """
+    Reenfileira em lote backups que falharam (botão "Refazer Selecionados").
+
+    Body JSON:
+        backups: lista de objetos { email, nome?, ticket_id? }
+
+    A exclusão da conta Workspace NUNCA é feita nesta retentativa
+    (deletar_conta=False), conforme o aviso exibido no dashboard.
+
+    Retorna 200 com { resultados: [{ email, status }] }, onde status é:
+        'iniciado'            — reenfileirado com sucesso
+        'ja_em_processamento' — já existe backup ativo para o e-mail
+        'erro'                — e-mail inválido ou falha ao enfileirar
+    """
+    dados = request.get_json(silent=True) or {}
+    backups = dados.get("backups")
+    if not isinstance(backups, list) or not backups:
+        return jsonify({"erro": "Lista de backups vazia ou ausente"}), 400
+
+    resultados = []
+    for item in backups:
+        email = ((item or {}).get("email") or "").strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            resultados.append({"email": email, "status": "erro", "motivo": "e-mail inválido"})
+            continue
+
+        nome      = (item.get("nome") or "").strip() or None
+        ticket_id = (item.get("ticket_id") or "").strip()
+        if not ticket_id:
+            ticket_id = f"REFAZER-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        if esta_em_processamento(email):
+            resultados.append({"email": email, "status": "ja_em_processamento"})
+            continue
+
+        try:
+            # deletar_conta=False: retentativa nunca exclui a conta Workspace.
+            iniciar_backup_async(email, ticket_id, nome, deletar_conta=False)
+            logger.info(f"Backup reenfileirado (refazer) — E-mail: {email}, Ticket: {ticket_id}")
+            resultados.append({"email": email, "status": "iniciado", "ticket_id": ticket_id})
+        except Exception as erro:
+            logger.error(f"Falha ao reenfileirar (refazer) {email}: {erro}")
+            resultados.append({"email": email, "status": "erro", "motivo": str(erro)})
+
+    return jsonify({"resultados": resultados}), 200
+
+
 # Template servido para download — mínimo, apenas cabeçalho.
 # A dica textual no dashboard já explica o formato e o limite.
 _TEMPLATE_CSV_LOTE = "email\n"
