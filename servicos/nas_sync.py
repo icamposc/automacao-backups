@@ -4,9 +4,9 @@ Modulo NAS Synology — Disponibilizacao de Backups
 ============================================================
 Versao: 1.0.0
 Data: 2026-05-22
-Descricao: Move o ZIP finalizado para NAS_SYNC_DIR/<email>/<arquivo>.zip.
+Descricao: Move o ZIP finalizado direto para NAS_SYNC_DIR/<arquivo>.zip.
            O NAS Synology sincroniza essa pasta por conta propria — o
-           servidor nao cria markers nem renomeia arquivos.
+           servidor nao cria markers, subpastas nem renomeia arquivos.
 
            NAO usa rede: a transferencia para o NAS e feita pelo proprio
            Synology lendo o disco do servidor (montado via SMB/NFS no NAS).
@@ -33,27 +33,21 @@ class ErroNasSync(Exception):
     """Levantada quando a disponibilizacao para o NAS falha."""
 
 
-def _pasta_destino_email(email: str) -> Path:
-    """Retorna a pasta dedicada ao email dentro de NAS_SYNC_DIR.
-
-    Estrutura: NAS_SYNC_DIR/<email>/<arquivo>.zip
-    """
-    return NAS_SYNC_DIR / email
-
-
 def disponibilizar_para_nas(
     caminho_arquivo: Path,
     nome_arquivo: str = None,
     sha256: str = None,
     on_progresso: callable = None,
 ) -> dict:
-    """Move o ZIP para NAS_SYNC_DIR para o NAS Synology coletar.
+    """Move o ZIP direto para NAS_SYNC_DIR para o NAS Synology coletar.
 
     Mantem a mesma assinatura de servicos/drive_upload.fazer_upload para
     permitir fallback transparente no orquestrador.
 
-    O nome do arquivo (com timestamp) ja vem unico, entao nao havera colisao
-    quando o mesmo email tiver multiplos backups historicos.
+    O nome no destino e o passado em nome_arquivo — o orquestrador define
+    como "<email>.zip", entao o ZIP final SEMPRE tem o e-mail como nome.
+    Um novo backup do mesmo e-mail sobrescreve o anterior: ha sempre um unico
+    ZIP corrente por colaborador, sem necessidade de subpasta.
 
     Args:
         caminho_arquivo: Caminho local do ZIP finalizado.
@@ -78,13 +72,10 @@ def disponibilizar_para_nas(
     nome = nome_arquivo or caminho_arquivo.name
     tamanho_mb = caminho_arquivo.stat().st_size / (1024 * 1024)
 
-    # O email vai como subdiretorio para separar por colaborador.
-    # Removemos a extensao .zip do nome para extrair o email do prefixo.
-    # Padrao esperado: <email>_YYYYMMDD_HHMMSS.zip
-    email = caminho_arquivo.stem.rsplit("_", 2)[0] if "_" in caminho_arquivo.stem else "_sem_email"
-
-    pasta_destino = _pasta_destino_email(email)
-    destino_zip = pasta_destino / nome
+    # O ZIP vai direto para a raiz de NAS_SYNC_DIR (sem subpasta por email).
+    # nome = nome_arquivo, que o orquestrador define como "<email>.zip" — o
+    # arquivo final sempre tem o e-mail como nome.
+    destino_zip = NAS_SYNC_DIR / nome
 
     logger.info(
         f"Disponibilizando para NAS: {nome} ({tamanho_mb:.1f} MB) -> {destino_zip}"
@@ -97,7 +88,7 @@ def disponibilizar_para_nas(
             pass
 
     try:
-        pasta_destino.mkdir(parents=True, exist_ok=True)
+        NAS_SYNC_DIR.mkdir(parents=True, exist_ok=True)
 
         # shutil.move usa os.rename quando origem e destino estao no mesmo filesystem
         # (instantaneo), e cai para copy+delete entre filesystems diferentes.
@@ -107,7 +98,7 @@ def disponibilizar_para_nas(
         # Mantem caminho_arquivo intacto se o move falhou no meio
         logger.error(f"Falha ao disponibilizar para NAS: {erro}")
         raise ErroNasSync(
-            f"Falha ao mover {nome} para {pasta_destino}: {erro}"
+            f"Falha ao mover {nome} para {NAS_SYNC_DIR}: {erro}"
         ) from erro
 
     if on_progresso:

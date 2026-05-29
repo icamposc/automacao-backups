@@ -58,15 +58,32 @@ class TestDisponibilizarParaNas:
         # Arquivo original nao deve mais existir (foi MOVIDO)
         assert not zip_dummy.exists(), "ZIP original deveria ter sido movido"
 
-        # Estrutura criada: NAS_SYNC_DIR/<email>/<arquivo>.zip (sem markers)
-        destino_email = sync_dir_temp / "joao@empresa.com"
-        destino_zip = destino_email / "joao@empresa.com_20260520_134430.zip"
+        # ZIP movido direto para a raiz de NAS_SYNC_DIR (sem subpasta, sem markers)
+        destino_zip = sync_dir_temp / "joao@empresa.com_20260520_134430.zip"
 
         assert destino_zip.exists(), f"ZIP nao chegou ao destino: {destino_zip}"
 
+        # Nenhuma subpasta por email deve ser criada
+        assert not (sync_dir_temp / "joao@empresa.com").exists()
+
         # Nenhum marker deve ser criado ao lado do ZIP
-        assert not (destino_email / f"{destino_zip.name}.ready").exists()
-        assert not (destino_email / f"{destino_zip.name}.uploaded").exists()
+        assert not (sync_dir_temp / f"{destino_zip.name}.ready").exists()
+        assert not (sync_dir_temp / f"{destino_zip.name}.uploaded").exists()
+
+    def test_nome_destino_e_o_email(self, sync_dir_temp, zip_dummy):
+        """O orquestrador passa nome_arquivo='<email>.zip'; o ZIP no destino
+        deve ter o e-mail como nome (sem timestamp), direto na raiz."""
+        from servicos.nas_sync import disponibilizar_para_nas
+
+        nome_email = "joao@empresa.com.zip"
+        r = disponibilizar_para_nas(zip_dummy, nome_arquivo=nome_email)
+
+        destino_zip = sync_dir_temp / nome_email
+        assert destino_zip.exists(), f"ZIP nao chegou como {nome_email} na raiz"
+        assert r["name"] == nome_email
+        assert r["webViewLink"] == f"nas:{destino_zip}"
+        # o nome local com timestamp NAO deve aparecer no destino
+        assert not (sync_dir_temp / zip_dummy.name).exists()
 
     def test_retorno_compativel_com_drive_upload(self, sync_dir_temp, zip_dummy):
         from servicos.nas_sync import disponibilizar_para_nas

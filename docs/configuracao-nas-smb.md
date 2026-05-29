@@ -18,7 +18,7 @@ montando a pasta do servidor via SMB. Isso elimina o gargalo da quota de
 ```
 ┌─ SERVIDOR (10.100.80.10) ────────────────────┐      ┌─ NAS Synology ──────────────┐
 │ Backup finaliza →                             │      │ Tarefa agendada (a cada Xh): │
-│   MOVE → /mnt/hdd/vault/sync_nas/<email>/X.zip│◄─SMB─│  1. monta //10.100.80.10/    │
+│   MOVE → /mnt/hdd/vault/sync_nas/X.zip        │◄─SMB─│  1. monta //10.100.80.10/    │
 │ status do backup = "aguardando_nas"           │ :445 │     sync_nas                 │
 │                                               │      │  2. sincroniza os *.zip      │
 │ finalizacao_nas.py: após 6h fecha ticket      │      │     para o storage do NAS    │
@@ -174,10 +174,10 @@ ls -la /volume1/Backups-Workspace/*/
 ## 4. Validação ponta a ponta
 
 1. **Servidor:** processar um backup pequeno → confirmar que aparece
-   `/mnt/hdd/vault/sync_nas/<email>/X.zip` e que o status do registro é
-   `aguardando_nas`.
+   `/mnt/hdd/vault/sync_nas/X.zip` (direto na raiz, sem subpasta) e que o status
+   do registro é `aguardando_nas`.
 2. **NAS:** rodar a sincronização (ou aguardar o agendamento) → confirmar o ZIP
-   em `/volume1/Backups-Workspace/<email>/`.
+   em `/volume1/Backups-Workspace/`.
 3. **Servidor:** após 6h, `finalizacao_nas.py` fecha o ticket no Jira, (quando
    aplicável) exclui a conta Workspace e **apaga o ZIP local**.
 4. **Servidor:** ZIPs órfãos (sem registro no banco) são apagados no boot pela
