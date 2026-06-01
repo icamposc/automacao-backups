@@ -35,6 +35,7 @@ from processamento.rastreador import (
     obter_backup,
 )
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
+from config.configuracoes import LIMITE_PARALELO_BACKUPS
 from utils.logger import obter_logger
 
 logger = obter_logger("dashboard")
@@ -247,13 +248,13 @@ def api_lote_template():
 _REGEX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Limite por upload — alinhado com a vazão prática do worker
-# (Celery --concurrency=4) e o limite do Google Vault (18 exports simultâneos).
+# (Celery --concurrency=9) e o limite do Google Vault (18 exports simultâneos).
 # Acima disso o usuário deve dividir o lote em arquivos menores.
 _MAX_EMAILS_POR_LOTE = 50
 
-# Reflete --concurrency do Celery em docker-compose.yml:125.
-# Se aumentar lá, atualizar aqui (ou expor via env var).
-_LIMITE_PARALELO = 4
+# Reflete o --concurrency do worker Celery (deploy/docker-compose.yml).
+# Lido de config (env LIMITE_PARALELO_BACKUPS, default 9) para não divergir.
+_LIMITE_PARALELO = LIMITE_PARALELO_BACKUPS
 
 
 def _extrair_emails_csv(conteudo: str) -> list[str]:
