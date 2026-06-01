@@ -184,6 +184,15 @@ MAX_EXPORTS_SIMULTANEOS = int(
     _obter_variavel("MAX_EXPORTS_SIMULTANEOS", obrigatoria=False, padrao="18")
 )
 
+# Limite de backups em execução simultânea — deve refletir o --concurrency do
+# worker Celery (deploy/docker-compose.yml). Usado apenas para exibição no
+# dashboard (ativos / limite). Default 9 = teto do semáforo do Vault
+# (MAX_EXPORTS_SIMULTANEOS=18 ÷ 2 exports por backup). Configurável via env
+# para não voltar a divergir do --concurrency.
+LIMITE_PARALELO_BACKUPS = int(
+    _obter_variavel("LIMITE_PARALELO_BACKUPS", obrigatoria=False, padrao="9")
+)
+
 # Threads paralelas no download de arquivos do Cloud Storage por backup.
 # Padrão 2 = otimizado para HDD rotacional (PASTA_VAULT em /mnt/hdd):
 # acima disso o iostat mostra %util=100% com r/s=w/s=0 (contenção na
