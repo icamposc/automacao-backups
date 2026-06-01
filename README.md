@@ -346,7 +346,7 @@ python -m app.servidor
 #    --pool=threads é obrigatório: o semáforo global de exports do Vault
 #    é process-local e só funciona com pool de threads.
 export PYTHONPATH=$PWD
-celery -A worker.celery_app worker --loglevel=info --pool=threads --concurrency=4
+celery -A worker.celery_app worker --loglevel=info --pool=threads --concurrency=9
 ```
 
 ### Produção (Gunicorn + Celery)
@@ -360,11 +360,11 @@ gunicorn -w 2 -b 0.0.0.0:5000 --timeout 120 app.servidor:app
 # Worker (em outro terminal ou como serviço)
 export PYTHONPATH=$PWD
 celery -A worker.celery_app worker \
-    --loglevel=info --pool=threads --concurrency=4 \
+    --loglevel=info --pool=threads --concurrency=9 \
     --logfile=logs/celery_worker.log --detach --pidfile=logs/celery_worker.pid
 ```
 
-> A `--concurrency=4` reflete o valor usado em produção (Docker Compose). Em ambientes com I/O mais rápido (NVMe), é seguro subir para 8 — observando que o limite de exports paralelos do Vault (`MAX_EXPORTS_SIMULTANEOS=18`) corresponde a ~9 backups simultâneos.
+> A `--concurrency=9` reflete o valor usado em produção (Docker Compose) e casa exatamente com o limite de exports paralelos do Vault: `MAX_EXPORTS_SIMULTANEOS=18` ÷ 2 exports por backup (e-mail + Drive) = ~9 backups simultâneos. Subir acima de 9 não aumenta o paralelismo real (ficaria barrado pelo semáforo) e o limite do Google Vault é 20. O storage atual é HDD — ao migrar para NVMe é possível reavaliar elevando também o semáforo.
 
 ### Verificar se está rodando
 

@@ -51,7 +51,7 @@ if [ "$1" = "--dev" ]; then
     celery -A worker.celery_app worker \
         --loglevel=info \
         --pool=threads \
-        --concurrency=10 \
+        --concurrency=9 \
         --queues=celery \
         --hostname="worker@%h"
 else
@@ -60,14 +60,14 @@ else
 
     echo "Modo: PRODUÇÃO"
     echo "  → Pool: threads (compartilha semáforo do Vault entre backups paralelos)"
-    echo "  → Concurrency: 10 (10 backups simultâneos; 10×2=20 exports, semáforo em 18)"
+    echo "  → Concurrency: 9 (9 backups simultâneos; 9×2=18 exports, casa com o semáforo em 18)"
     echo "  → Logs: logs/celery_worker.log"
     echo ""
 
     celery -A worker.celery_app worker \
         --loglevel=info \
         --pool=threads \
-        --concurrency=10 \
+        --concurrency=9 \
         --queues=celery \
         --hostname="worker@%h" \
         --logfile="logs/celery_worker.log" \

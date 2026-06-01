@@ -117,16 +117,16 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # --concurrency=4 (alinha com a pendencia 1): conservador para o
-    # HDD atual em /mnt/hdd, ainda dobra a capacidade efetiva de PROD
-    # (que estava em 2). Limite Vault de 18 exports simultaneos = 9
-    # backups paralelos, entao 4 deixa folga. Quando o storage migrar
-    # para NVMe, revisar para 8 ou mais.
+    # --concurrency=9: usa o teto logico do semaforo do Vault. Limite de
+    # 18 exports simultaneos = ~9 backups paralelos (2 exports por backup:
+    # e-mail + Drive), entao 9 aproveita toda a capacidade sem estourar o
+    # semaforo nem o limite do Google Vault (20). Storage ainda em HDD
+    # (/mnt/hdd) — monitorar I/O e memoria (ja houve OOM exit 137).
     command: >
       celery -A worker.celery_app worker
         --loglevel=info
         --pool=threads
-        --concurrency=4
+        --concurrency=9
         --queues=celery
         --hostname=worker@%h
         --logfile=/app/logs/celery_worker.log

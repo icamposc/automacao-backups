@@ -163,7 +163,7 @@ services:
       celery -A worker.celery_app worker
         --loglevel=info
         --pool=threads
-        --concurrency=4
+        --concurrency=9
         --queues=celery
         --hostname=worker@%h
         --logfile=/app/logs/celery_worker.log
