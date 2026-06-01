@@ -12,14 +12,42 @@ google-api-python-client==2.159.0
 # Autenticação com Service Account do Google
 google-auth==2.37.0
 
+# Adaptador HTTP para google-auth com httplib2
+google-auth-httplib2==0.2.0
+
+# Transporte HTTP do google-api-python-client (importado direto em servicos/google_auth.py)
+httplib2==0.31.2
+
 # Download de arquivos do Cloud Storage (exports do Vault)
 google-cloud-storage==2.19.0
 
-# Requisições HTTP para API REST do Jira
+# Requisições HTTP para API REST do Jira e Google Chat
 requests==2.32.3
 
 # Carregamento de variáveis de ambiente do arquivo .env
 python-dotenv==1.0.1
 
-# Servidor WSGI para produção (substitui o servidor de desenvolvimento do Flask)
+# Servidor WSGI para produção
 gunicorn==23.0.0
+
+# Fila de tarefas assíncrona com suporte a Redis
+celery[redis]==5.4.0
+
+# Cliente Redis (broker do Celery + verificação de saúde)
+redis==5.2.0
+
+# ─── Dependências de desenvolvimento/teste ───────────────────
+# Para instalar apenas em dev: pip install -r requirements-dev.txt
+# (ou instale abaixo apenas em ambientes de desenvolvimento)
+
+# Framework de testes
+pytest==8.3.4
+
+# Plugin para mocking avançado
+pytest-mock==3.14.0
+
+# Cobertura de código
+pytest-cov==6.0.0
+
+# Mock de chamadas HTTP (requests)
+responses==0.25.3

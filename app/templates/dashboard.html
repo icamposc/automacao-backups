@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Automação de Backups</title>
+    <style>
+        :root {
+            --cor-fundo: #0f172a;
+            --cor-superficie: #1e293b;
+            --cor-borda: #334155;
+            --cor-texto: #e2e8f0;
+            --cor-texto-suave: #94a3b8;
+            --cor-primaria: #3b82f6;
+            --cor-sucesso: #22c55e;
+            --cor-erro: #ef4444;
+            --cor-aviso: #f59e0b;
+            --cor-andamento: #8b5cf6;
+            --cor-pendente: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--cor-fundo);
+            color: var(--cor-texto);
+            min-height: 100vh;
+        }
+
+        /* Cabeçalho */
+        .cabecalho {
+            background: var(--cor-superficie);
+            border-bottom: 1px solid var(--cor-borda);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cabecalho h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .cabecalho .status-conexao {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .indicador-online {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--cor-sucesso);
+            animation: pulsar 2s infinite;
+        }
+
+        @keyframes pulsar {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Container principal */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        /* Cards de resumo */
+        .resumo {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-resumo {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+
+        .card-resumo .rotulo {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .card-resumo .valor {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .card-resumo .valor.ativos { color: var(--cor-andamento); }
+        .card-resumo .valor.sucessos { color: var(--cor-sucesso); }
+        .card-resumo .valor.erros { color: var(--cor-erro); }
+        .card-resumo .valor.total { color: var(--cor-primaria); }
+
+        /* Seção */
+        .secao {
+            margin-bottom: 2rem;
+        }
+
+        .secao-titulo {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Tabela de backups */
+        .tabela-container {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: rgba(51, 65, 85, 0.5);
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--cor-texto-suave);
+            border-bottom: 1px solid var(--cor-borda);
+        }
+
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--cor-borda);
+            font-size: 0.875rem;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        /* Badge de status */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-pendente {
+            background: rgba(100, 116, 139, 0.2);
+            color: var(--cor-pendente);
+        }
+
+        .badge-em-andamento {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--cor-andamento);
+        }
+
+        .badge-concluido {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--cor-sucesso);
+        }
+
+        .badge-erro {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--cor-erro);
+        }
+
+        .badge-ponto {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .badge-em-andamento .badge-ponto {
+            animation: pulsar 1.5s infinite;
+        }
+
+        /* Barra de progresso das etapas */
+        .progresso-etapas {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .etapa-bloco {
+            width: 28px;
+            height: 8px;
+            border-radius: 4px;
+            background: var(--cor-borda);
+            position: relative;
+            cursor: pointer;
+        }
+
+        .etapa-bloco.pendente { background: var(--cor-borda); }
+        .etapa-bloco.em_andamento {
+            background: var(--cor-andamento);
+            animation: pulsar 1.5s infinite;
+        }
+        .etapa-bloco.concluido { background: var(--cor-sucesso); }
+        .etapa-bloco.erro { background: var(--cor-erro); }
+
+        .etapa-bloco .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            white-space: nowrap;
+            z-index: 10;
+            margin-bottom: 4px;
+            color: var(--cor-texto);
+        }
+
+        .etapa-bloco:hover .tooltip {
+            display: block;
+        }
+
+        /* Barra de progresso download/upload */
+        .mini-progresso {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .mini-progresso-label {
+            white-space: nowrap;
+            min-width: 84px;
+            font-weight: 500;
+        }
+
+        .mini-progresso-label.download { color: var(--cor-aviso); }
+        .mini-progresso-label.upload   { color: var(--cor-primaria); }
+
+        .mini-progresso-trilha {
+            flex: 1;
+            height: 5px;
+            border-radius: 3px;
+            background: var(--cor-borda);
+            overflow: hidden;
+            min-width: 80px;
+        }
+
+        .mini-progresso-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 1s ease;
+        }
+
+        .mini-progresso-fill.download { background: var(--cor-aviso); }
+        .mini-progresso-fill.upload   { background: var(--cor-primaria); }
+
+        /* Mensagem vazia */
+        .vazio {
+            text-align: center;
+            padding: 2rem;
+            color: var(--cor-texto-suave);
+            font-size: 0.875rem;
+        }
+
+        /* Link */
+        a {
+            color: var(--cor-primaria);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Detalhes do colaborador */
+        .detalhe-nome {
+            font-weight: 500;
+        }
+
+        .detalhe-email {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+        }
+
+        /* Atualização automática */
+        .auto-refresh {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+        }
+
+        /* Painel de disparo manual */
+        .painel-manual {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .painel-manual h2 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--cor-texto);
+        }
+
+        .form-manual {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1fr auto;
+            gap: 0.75rem;
+            align-items: end;
+        }
+
+        .campo-grupo {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .campo-grupo label {
+            font-size: 0.75rem;
+            color: var(--cor-texto-suave);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .campo-grupo input {
+            background: var(--cor-fundo);
+            border: 1px solid var(--cor-borda);
+            border-radius: 8px;
+            padding: 0.6rem 0.875rem;
+            color: var(--cor-texto);
+            font-size: 0.875rem;
+            outline: none;
+            transition: border-color 0.15s;
+            width: 100%;
+        }
+
+        .campo-grupo input:focus {
+            border-color: var(--cor-primaria);
+        }
+
+        .campo-grupo input::placeholder {
+            color: var(--cor-pendente);
+        }
+
+        .btn-iniciar {
+            background: var(--cor-primaria);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.6rem 1.25rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, opacity 0.15s;
+            white-space: nowrap;
+            height: 38px;
+        }
+
+        .btn-iniciar:hover { background: #2563eb; }
+        .btn-iniciar:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .campo-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding-bottom: 2px;
+        }
+
+        .campo-toggle input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--cor-erro);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .campo-toggle label {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .campo-toggle input:checked + label {
+            color: var(--cor-erro);
+        }
+
+        .feedback-manual {
+            margin-top: 0.875rem;
+            padding: 0.65rem 0.875rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            display: none;
+        }
+
+        .feedback-manual.sucesso {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: var(--cor-sucesso);
+        }
+
+        .feedback-manual.erro {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--cor-erro);
+        }
+
+        /* Painel de upload CSV (backup em massa) */
+        .form-lote {
+            display: grid;
+            grid-template-columns: 2fr 1fr auto;
+            gap: 0.75rem;
+            align-items: end;
+        }
+
+        .campo-arquivo input[type="file"] {
+            background: var(--cor-fundo);
+            border: 1px dashed var(--cor-borda);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            color: var(--cor-texto);
+            font-size: 0.825rem;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        .campo-arquivo input[type="file"]::file-selector-button {
+            background: var(--cor-borda);
+            color: var(--cor-texto);
+            border: none;
+            border-radius: 6px;
+            padding: 0.35rem 0.75rem;
+            margin-right: 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .dica-lote {
+            font-size: 0.72rem;
+            color: var(--cor-texto-suave);
+            margin-top: 0.5rem;
+            line-height: 1.4;
+        }
+
+        .dica-lote code {
+            background: var(--cor-fundo);
+            padding: 0.05rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+        }
+
+        .link-template {
+            display: inline-flex;
+            align-items: center;
+            margin-top: 0.4rem;
+            color: var(--cor-primaria);
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+
+        .link-template:hover {
+            color: #60a5fa;
+            text-decoration: underline;
+        }
+
+        .resumo-lote {
+            margin-top: 0.875rem;
+            padding: 0.75rem 0.875rem;
+            background: var(--cor-fundo);
+            border: 1px solid var(--cor-borda);
+            border-radius: 8px;
+            display: none;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+
+        .resumo-lote .linha-resumo { display: flex; gap: 0.5rem; align-items: center; }
+        .resumo-lote .pill {
+            display: inline-block;
+            padding: 0.1rem 0.5rem;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .resumo-lote .pill.ok    { background: rgba(34, 197, 94, 0.15);  color: var(--cor-sucesso); }
+        .resumo-lote .pill.skip  { background: rgba(245, 158, 11, 0.15); color: var(--cor-aviso); }
+        .resumo-lote .pill.erro  { background: rgba(239, 68, 68, 0.15);  color: var(--cor-erro); }
+        .resumo-lote details summary {
+            cursor: pointer;
+            color: var(--cor-texto-suave);
+            font-size: 0.75rem;
+            margin-top: 0.35rem;
+        }
+        .resumo-lote details ul {
+            margin: 0.35rem 0 0 1.25rem;
+            color: var(--cor-texto-suave);
+            font-size: 0.75rem;
+        }
+
+        /* Cabeçalho da seção com botão de ação */
+        .secao-cabecalho {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .secao-cabecalho .secao-titulo {
+            margin-bottom: 0;
+        }
+
+        /* Painel de retry */
+        .painel-refazer {
+            display: none;
+            align-items: center;
+            gap: 0.75rem;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+        .painel-refazer .contagem {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+        }
+
+        .btn-refazer {
+            background: var(--cor-erro);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.45rem 0.9rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            transition: opacity 0.15s;
+        }
+
+        .btn-refazer:hover { opacity: 0.85; }
+        .btn-refazer:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Checkbox na tabela */
+        .chk-erro {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--cor-erro);
+            cursor: pointer;
+        }
+
+        th.col-chk, td.col-chk {
+            width: 36px;
+            text-align: center;
+            padding: 0.5rem 0.25rem;
+        }
+
+        /* Responsividade */
+        @media (max-width: 768px) {
+            .form-manual,
+            .form-lote {
+                grid-template-columns: 1fr;
+            }
+        }
+            .cabecalho {
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+
+            .resumo {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .tabela-container {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="cabecalho">
+        <h1>Automação de Backups — Dashboard</h1>
+        <div class="status-conexao">
+            <div class="indicador-online"></div>
+            <span>Atualização automática a cada 10s</span>
+            <span class="auto-refresh" id="ultima-atualizacao"></span>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Disparo Manual -->
+        <section class="painel-manual">
+            <h2>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                Iniciar Backup Manual
+            </h2>
+            <div class="form-manual">
+                <div class="campo-grupo">
+                    <label for="inp-email">E-mail corporativo *</label>
+                    <input type="email" id="inp-email" placeholder="colaborador@empresa.com.br" autocomplete="off" />
+                </div>
+                <div class="campo-grupo">
+                    <label for="inp-nome">Nome completo</label>
+                    <input type="text" id="inp-nome" placeholder="Opcional" />
+                </div>
+                <div class="campo-grupo">
+                    <label for="inp-ticket">Ticket Jira</label>
+                    <input type="text" id="inp-ticket" placeholder="Ex: SPN-999 (opcional)" />
+                </div>
+                <div class="campo-toggle">
+                    <input type="checkbox" id="inp-deletar-conta" checked />
+                    <label for="inp-deletar-conta">Deletar conta após backup</label>
+                </div>
+                <button class="btn-iniciar" id="btn-iniciar" onclick="iniciarBackupManual()">
+                    Iniciar Backup
+                </button>
+            </div>
+            <div class="feedback-manual" id="feedback-manual"></div>
+        </section>
+
+        <!-- Backup em Massa (CSV) -->
+        <section class="painel-manual">
+            <h2>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Backup em Massa (CSV)
+            </h2>
+            <div class="form-lote">
+                <div class="campo-grupo campo-arquivo">
+                    <label for="inp-arquivo-lote">Arquivo .csv com lista de e-mails *</label>
+                    <input type="file" id="inp-arquivo-lote" accept=".csv,text/csv" />
+                </div>
+                <div class="campo-toggle">
+                    <input type="checkbox" id="inp-deletar-conta-lote" checked />
+                    <label for="inp-deletar-conta-lote">Deletar conta após backup</label>
+                </div>
+                <button class="btn-iniciar" id="btn-iniciar-lote" onclick="iniciarBackupLote()">
+                    Enviar Lote
+                </button>
+            </div>
+            <div class="dica-lote">
+                Formatos aceitos: CSV com cabeçalho <code>email</code> ou uma única coluna sem cabeçalho (um e-mail por linha).
+                <strong>Limite de 50 e-mails por upload</strong> — para volumes maiores, divida em arquivos menores e envie em sequência (todos serão enfileirados na ordem).
+                A opção de deletar conta é aplicada a todos os e-mails do lote.
+                <br>
+                <a class="link-template" href="/api/backups/lote/template" download>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 0.25rem;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Baixar template de exemplo (.csv)
+                </a>
+            </div>
+            <div class="resumo-lote" id="resumo-lote"></div>
+        </section>
+
+        <!-- Resumo -->
+        <section class="resumo" id="resumo">
+            <div class="card-resumo">
+                <div class="rotulo">Em Execução</div>
+                <div class="valor ativos" id="resumo-execucao">0 / 4</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Aguardando na Fila</div>
+                <div class="valor" id="resumo-aguardando">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Em Andamento</div>
+                <div class="valor ativos" id="resumo-ativos">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Concluídos</div>
+                <div class="valor sucessos" id="resumo-sucessos">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Com Erro</div>
+                <div class="valor erros" id="resumo-erros">0</div>
+            </div>
+            <div class="card-resumo">
+                <div class="rotulo">Total Finalizados</div>
+                <div class="valor total" id="resumo-total">0</div>
+            </div>
+        </section>
+
+        <!-- Backups Ativos -->
+        <section class="secao">
+            <h2 class="secao-titulo">
+                <span class="badge-ponto" style="background: var(--cor-andamento); width: 10px; height: 10px; border-radius: 50%; display: inline-block;"></span>
+                Backups em Andamento
+            </h2>
+            <div class="tabela-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Colaborador</th>
+                            <th>Ticket</th>
+                            <th>Início</th>
+                            <th>Progresso</th>
+                            <th>Etapa Atual</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-ativos">
+                        <tr><td colspan="6" class="vazio">Nenhum backup em andamento</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Histórico -->
+        <section class="secao">
+            <div class="secao-cabecalho">
+                <h2 class="secao-titulo">
+                    <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--cor-texto-suave);"></span>
+                    Histórico Recente
+                </h2>
+                <div class="painel-refazer" id="painel-refazer">
+                    <span class="contagem" id="contagem-selecionados">0 selecionado(s)</span>
+                    <button class="btn-refazer" id="btn-refazer" onclick="refazerSelecionados()">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                        Refazer Selecionados
+                    </button>
+                </div>
+            </div>
+            <div class="tabela-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="col-chk"><input type="checkbox" id="chk-todos-erros" class="chk-erro" title="Selecionar todos com erro" onchange="selecionarTodosErros(this.checked)" /></th>
+                            <th>Colaborador</th>
+                            <th>Ticket</th>
+                            <th>Início</th>
+                            <th>Fim</th>
+                            <th>Status</th>
+                            <th>Link</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-historico">
+                        <tr><td colspan="7" class="vazio">Nenhum backup no histórico</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Intervalo de atualização automática (milissegundos)
+        const INTERVALO_ATUALIZACAO = 10000;
+
+        /**
+         * Formata uma data ISO para exibição legível
+         */
+        function formatarData(dataISO) {
+            if (!dataISO) return '—';
+            const data = new Date(dataISO);
+            return data.toLocaleString('pt-BR', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+            });
+        }
+
+        /**
+         * Retorna o texto legível para um status
+         */
+        function textoStatus(status) {
+            const mapa = {
+                'pendente': 'Pendente',
+                'em_andamento': 'Em Andamento',
+                'concluido': 'Concluído',
+                'erro': 'Erro',
+            };
+            return mapa[status] || status;
+        }
+
+        /**
+         * Cria o HTML do badge de status
+         */
+        function criarBadge(status) {
+            return `<span class="badge badge-${status}">
+                        <span class="badge-ponto"></span>
+                        ${textoStatus(status)}
+                    </span>`;
+        }
+
+        /**
+         * Cria a barra de progresso com as 8 etapas + mini-barra para download/upload
+         */
+        function criarBarraProgresso(etapas) {
+            let html = '<div class="progresso-etapas">';
+            for (const etapa of etapas) {
+                html += `<div class="etapa-bloco ${etapa.status}">
+                            <div class="tooltip">${etapa.numero}. ${etapa.nome} — ${textoStatus(etapa.status)}</div>
+                         </div>`;
+            }
+            html += '</div>';
+
+            for (const etapa of etapas) {
+                if (etapa.status === 'em_andamento' && etapa.progresso_pct != null && (etapa.numero === 4 || etapa.numero === 6)) {
+                    const tipo  = etapa.numero === 4 ? 'download' : 'upload';
+                    const label = etapa.numero === 4 ? 'Download' : 'Upload';
+                    html += `
+                        <div class="mini-progresso">
+                            <span class="mini-progresso-label ${tipo}">${label}: ${etapa.progresso_pct}%</span>
+                            <div class="mini-progresso-trilha">
+                                <div class="mini-progresso-fill ${tipo}" style="width:${etapa.progresso_pct}%"></div>
+                            </div>
+                        </div>`;
+                }
+            }
+
+            return html;
+        }
+
+        /**
+         * Identifica a etapa atual (última em andamento ou concluída)
+         */
+        function etapaAtual(etapas) {
+            let atual = null;
+            for (const etapa of etapas) {
+                if (etapa.status === 'em_andamento') return etapa;
+                if (etapa.status === 'concluido') atual = etapa;
+            }
+            return atual;
+        }
+
+        /**
+         * Busca dados da API e atualiza o dashboard
+         */
+        async function atualizarDashboard() {
+            try {
+                const [resResumo, resAtivos, resHistorico, resFila] = await Promise.all([
+                    fetch('/api/backups/resumo'),
+                    fetch('/api/backups/ativos'),
+                    fetch('/api/backups/historico'),
+                    fetch('/api/backups/fila'),
+                ]);
+
+                const resumo = await resResumo.json();
+                const ativos = await resAtivos.json();
+                const historico = await resHistorico.json();
+                const fila = await resFila.json();
+
+                // Atualizar resumo
+                document.getElementById('resumo-execucao').textContent =
+                    `${fila.ativos} / ${fila.limite_paralelo}`;
+                document.getElementById('resumo-aguardando').textContent = fila.aguardando;
+                document.getElementById('resumo-ativos').textContent = resumo.ativos;
+                document.getElementById('resumo-sucessos').textContent = resumo.sucessos;
+                document.getElementById('resumo-erros').textContent = resumo.erros;
+                document.getElementById('resumo-total').textContent = resumo.total_finalizados;
+
+                // Atualizar tabela de ativos
+                const tabelaAtivos = document.getElementById('tabela-ativos');
+                if (ativos.length === 0) {
+                    tabelaAtivos.innerHTML = '<tr><td colspan="6" class="vazio">Nenhum backup em andamento</td></tr>';
+                } else {
+                    tabelaAtivos.innerHTML = ativos.map(backup => {
+                        const atual = etapaAtual(backup.etapas);
+                        let nomeEtapa;
+                        if (!atual) {
+                            nomeEtapa = 'Iniciando...';
+                        } else if (atual.progresso_pct != null && atual.status === 'em_andamento' && (atual.numero === 4 || atual.numero === 6)) {
+                            const labelEtapa = atual.numero === 4 ? 'Download' : 'Upload';
+                            nomeEtapa = `${atual.numero}/8 — ${labelEtapa} (${atual.progresso_pct}%)`;
+                        } else {
+                            nomeEtapa = `${atual.numero}/8 — ${atual.nome}`;
+                        }
+                        return `<tr>
+                            <td>
+                                <div class="detalhe-nome">${backup.nome}</div>
+                                <div class="detalhe-email">${backup.email}</div>
+                            </td>
+                            <td>${backup.ticket_id}</td>
+                            <td>${formatarData(backup.inicio)}</td>
+                            <td>${criarBarraProgresso(backup.etapas)}</td>
+                            <td>${nomeEtapa}</td>
+                            <td>${criarBadge(backup.status_geral)}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Atualizar tabela de histórico
+                const tabelaHistorico = document.getElementById('tabela-historico');
+                const dadosHistorico = historico.dados || [];
+                if (dadosHistorico.length === 0) {
+                    tabelaHistorico.innerHTML = '<tr><td colspan="7" class="vazio">Nenhum backup no histórico</td></tr>';
+                } else {
+                    tabelaHistorico.innerHTML = dadosHistorico.map(backup => {
+                        const linkHtml = backup.link_drive
+                            ? `<a href="${backup.link_drive}" target="_blank">Abrir no Drive</a>`
+                            : '—';
+                        const erroInfo = backup.erro_mensagem
+                            ? `<br><span style="font-size:0.7rem;color:var(--cor-erro);">${backup.erro_mensagem}</span>`
+                            : '';
+                        const emailEsc    = (backup.email || '').replace(/"/g, '&quot;');
+                        const nomeEsc     = (backup.nome || '').replace(/"/g, '&quot;');
+                        const ticketEsc   = (backup.ticket_id || '').replace(/"/g, '&quot;');
+                        const chkCell = backup.status_geral === 'erro'
+                            ? `<td class="col-chk"><input type="checkbox" class="chk-erro chk-backup-erro" data-email="${emailEsc}" data-nome="${nomeEsc}" data-ticket="${ticketEsc}" onchange="atualizarPainelRefazer()" /></td>`
+                            : `<td class="col-chk"></td>`;
+                        return `<tr>
+                            ${chkCell}
+                            <td>
+                                <div class="detalhe-nome">${backup.nome}</div>
+                                <div class="detalhe-email">${backup.email}</div>
+                            </td>
+                            <td>${backup.ticket_id}</td>
+                            <td>${formatarData(backup.inicio)}</td>
+                            <td>${formatarData(backup.fim)}</td>
+                            <td>${criarBadge(backup.status_geral)}${erroInfo}</td>
+                            <td>${linkHtml}</td>
+                        </tr>`;
+                    }).join('');
+                }
+
+                // Sincroniza estado do painel de retry após atualização da tabela
+                atualizarPainelRefazer();
+
+                // Atualizar timestamp
+                document.getElementById('ultima-atualizacao').textContent =
+                    `Última: ${new Date().toLocaleTimeString('pt-BR')}`;
+
+            } catch (erro) {
+                console.error('Erro ao atualizar dashboard:', erro);
+            }
+        }
+
+        /**
+         * Atualiza visibilidade do painel de retry e a contagem de selecionados
+         */
+        function atualizarPainelRefazer() {
+            const checkboxes  = document.querySelectorAll('.chk-backup-erro');
+            const selecionados = document.querySelectorAll('.chk-backup-erro:checked');
+            const painel      = document.getElementById('painel-refazer');
+            const contagem    = document.getElementById('contagem-selecionados');
+            const chkTodos    = document.getElementById('chk-todos-erros');
+
+            const total = checkboxes.length;
+            const n     = selecionados.length;
+
+            contagem.textContent = `${n} selecionado(s)`;
+            painel.style.display = n > 0 ? 'flex' : 'none';
+
+            // Atualiza estado "selecionar todos"
+            if (chkTodos) {
+                chkTodos.indeterminate = n > 0 && n < total;
+                chkTodos.checked = total > 0 && n === total;
+            }
+        }
+
+        /**
+         * Seleciona ou desmarca todos os checkboxes de erro
+         */
+        function selecionarTodosErros(marcar) {
+            document.querySelectorAll('.chk-backup-erro').forEach(chk => {
+                chk.checked = marcar;
+            });
+            atualizarPainelRefazer();
+        }
+
+        /**
+         * Envia os backups selecionados para reprocessamento
+         */
+        async function refazerSelecionados() {
+            const checkboxes = document.querySelectorAll('.chk-backup-erro:checked');
+            if (checkboxes.length === 0) return;
+
+            const nomes = Array.from(checkboxes).map(c => c.dataset.email).join('\n• ');
+            const confirmacao = confirm(
+                `Confirma o reprocessamento de ${checkboxes.length} backup(s)?\n\n• ${nomes}\n\nObs: a exclusão da conta NÃO será realizada nesta retentativa.`
+            );
+            if (!confirmacao) return;
+
+            const btn = document.getElementById('btn-refazer');
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                Processando...`;
+
+            const backups = Array.from(checkboxes).map(chk => ({
+                email:     chk.dataset.email,
+                nome:      chk.dataset.nome   || null,
+                ticket_id: chk.dataset.ticket || null,
+            }));
+
+            try {
+                const resp = await fetch('/api/backups/refazer', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ backups }),
+                });
+
+                const dados = await resp.json();
+                if (!resp.ok) {
+                    mostrarFeedback(dados.erro || 'Erro ao enviar solicitação.', 'erro');
+                    return;
+                }
+
+                const resultados  = dados.resultados || [];
+                const iniciados   = resultados.filter(r => r.status === 'iniciado').length;
+                const emAndamento = resultados.filter(r => r.status === 'ja_em_processamento').length;
+                const erros       = resultados.filter(r => r.status === 'erro').length;
+
+                let msg = `${iniciados} backup(s) reiniciado(s).`;
+                if (emAndamento) msg += ` ${emAndamento} já em andamento (ignorado).`;
+                if (erros)       msg += ` ${erros} falhou ao enfileirar.`;
+
+                mostrarFeedback(msg, iniciados > 0 ? 'sucesso' : 'erro');
+                atualizarDashboard();
+            } catch (e) {
+                mostrarFeedback('Falha de comunicação com o servidor.', 'erro');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.49"/></svg>
+                    Refazer Selecionados`;
+            }
+        }
+
+        /**
+         * Envia o formulário de backup manual para a API
+         */
+        async function iniciarBackupManual() {
+            const email        = document.getElementById('inp-email').value.trim();
+            const nome         = document.getElementById('inp-nome').value.trim();
+            const ticketId     = document.getElementById('inp-ticket').value.trim();
+            const deletarConta = document.getElementById('inp-deletar-conta').checked;
+            const btn          = document.getElementById('btn-iniciar');
+            const feedback     = document.getElementById('feedback-manual');
+
+            if (!email) {
+                mostrarFeedback('E-mail é obrigatório.', 'erro');
+                document.getElementById('inp-email').focus();
+                return;
+            }
+
+            // Confirmação antes de disparar
+            const confirmacao = confirm(
+                `Confirma o início do backup manual?\n\nE-mail: ${email}` +
+                (nome ? `\nNome: ${nome}` : '') +
+                (ticketId ? `\nTicket: ${ticketId}` : '\nTicket: gerado automaticamente') +
+                `\nDeletar conta: ${deletarConta ? 'SIM' : 'NÃO'}`
+            );
+            if (!confirmacao) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Iniciando...';
+            feedback.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/backups/iniciar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        nome:          nome || null,
+                        ticket_id:     ticketId || null,
+                        deletar_conta: deletarConta,
+                    }),
+                });
+
+                const dados = await resp.json();
+
+                if (resp.ok) {
+                    mostrarFeedback(
+                        `Backup iniciado com sucesso. Ticket: ${dados.ticket_id}`,
+                        'sucesso'
+                    );
+                    document.getElementById('inp-email').value = '';
+                    document.getElementById('inp-nome').value = '';
+                    document.getElementById('inp-ticket').value = '';
+                    atualizarDashboard();
+                } else {
+                    mostrarFeedback(dados.erro || 'Erro ao iniciar o backup.', 'erro');
+                }
+            } catch (e) {
+                mostrarFeedback('Falha de comunicação com o servidor.', 'erro');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Iniciar Backup';
+            }
+        }
+
+        function mostrarFeedback(mensagem, tipo) {
+            const el = document.getElementById('feedback-manual');
+            el.textContent = mensagem;
+            el.className = `feedback-manual ${tipo}`;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 8000);
+        }
+
+        /**
+         * Faz upload do arquivo CSV de backup em massa
+         */
+        async function iniciarBackupLote() {
+            const inputArquivo = document.getElementById('inp-arquivo-lote');
+            const deletarConta = document.getElementById('inp-deletar-conta-lote').checked;
+            const btn          = document.getElementById('btn-iniciar-lote');
+            const boxResumo    = document.getElementById('resumo-lote');
+
+            const arquivo = inputArquivo.files[0];
+            if (!arquivo) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Selecione um arquivo .csv antes de enviar.</span>';
+                return;
+            }
+            if (!arquivo.name.toLowerCase().endsWith('.csv')) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Apenas arquivos .csv são aceitos.</span>';
+                return;
+            }
+
+            // Pré-validação local — evita upload se passar do limite por lote
+            const LIMITE_LOTE = 50;
+            try {
+                const texto  = await arquivo.text();
+                const linhas = texto.split(/\r?\n/)
+                    .map(l => l.trim())
+                    .filter(l => l && !l.startsWith('#'));
+                const temCabecalho = /(^|,)\s*email\s*(,|$)/i.test(linhas[0] || '');
+                const totalLocal   = Math.max(0, linhas.length - (temCabecalho ? 1 : 0));
+                if (totalLocal > LIMITE_LOTE) {
+                    boxResumo.style.display = 'block';
+                    boxResumo.innerHTML =
+                        `<span style="color: var(--cor-erro);">O arquivo contém ${totalLocal} e-mails. ` +
+                        `O limite por upload é de ${LIMITE_LOTE}. Divida em arquivos menores e envie em sequência ` +
+                        `— todos os backups serão enfileirados na ordem.</span>`;
+                    return;
+                }
+            } catch (e) {
+                // Falha na leitura local não bloqueia — backend faz a validação canônica
+            }
+
+            const confirmacao = confirm(
+                `Confirma o envio do lote?\n\n` +
+                `Arquivo: ${arquivo.name}\n` +
+                `Deletar conta após backup: ${deletarConta ? 'SIM' : 'NÃO'}\n\n` +
+                `Cada e-mail válido será enfileirado imediatamente.`
+            );
+            if (!confirmacao) return;
+
+            btn.disabled = true;
+            btn.textContent = 'Enviando...';
+            boxResumo.style.display = 'none';
+            boxResumo.innerHTML = '';
+
+            const fd = new FormData();
+            fd.append('arquivo', arquivo);
+            fd.append('deletar_conta', deletarConta ? 'true' : 'false');
+
+            try {
+                const resp  = await fetch('/api/backups/lote', { method: 'POST', body: fd });
+                const dados = await resp.json();
+
+                if (!resp.ok) {
+                    boxResumo.style.display = 'block';
+                    boxResumo.innerHTML = `<span style="color: var(--cor-erro);">${dados.erro || 'Erro ao processar o arquivo.'}</span>`;
+                    return;
+                }
+
+                const aceitos    = dados.aceitos || [];
+                const emAndamento = dados.ja_em_processamento || [];
+                const invalidos  = dados.invalidos || [];
+
+                const listaInvalidos = invalidos.length
+                    ? `<details><summary>Ver ${invalidos.length} inválido(s)</summary>
+                         <ul>${invalidos.map(e => `<li>${e}</li>`).join('')}</ul>
+                       </details>`
+                    : '';
+                const listaEmAndamento = emAndamento.length
+                    ? `<details><summary>Ver ${emAndamento.length} já em processamento</summary>
+                         <ul>${emAndamento.map(e => `<li>${e}</li>`).join('')}</ul>
+                       </details>`
+                    : '';
+
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = `
+                    <div class="linha-resumo">
+                        <strong>Lote processado:</strong>
+                        <span class="pill ok">${aceitos.length} aceito(s)</span>
+                        <span class="pill skip">${emAndamento.length} em processamento</span>
+                        <span class="pill erro">${invalidos.length} inválido(s)</span>
+                        <span style="color: var(--cor-texto-suave); margin-left: auto;">
+                            Total no arquivo: ${dados.total_linhas} · Deletar conta: ${dados.deletar_conta ? 'SIM' : 'NÃO'}
+                        </span>
+                    </div>
+                    ${listaEmAndamento}
+                    ${listaInvalidos}
+                `;
+
+                inputArquivo.value = '';
+                atualizarDashboard();
+            } catch (e) {
+                boxResumo.style.display = 'block';
+                boxResumo.innerHTML = '<span style="color: var(--cor-erro);">Falha de comunicação com o servidor.</span>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Enviar Lote';
+            }
+        }
+
+        // Enter no campo de e-mail também dispara
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('inp-email').addEventListener('keydown', e => {
+                if (e.key === 'Enter') iniciarBackupManual();
+            });
+        });
+
+        // Atualização inicial e periódica
+        atualizarDashboard();
+        setInterval(atualizarDashboard, INTERVALO_ATUALIZACAO);
+    </script>
+</body>
+</html>

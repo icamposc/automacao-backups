@@ -1,0 +1,32 @@
+# ─── Ambiente virtual Python ──────────────────────────────
+venv/
+
+# ─── Variáveis de ambiente (secrets) ──────────────────────
+.env
+
+# ─── Credenciais Google (montadas como volume) ────────────
+config/credenciais/service-account.json
+config/credenciais/ca-bundle.crt
+
+# ─── Cache e bytecode ─────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ─── Dados gerados em runtime (montados como volume) ──────
+logs/
+temp/
+dados/backups.db
+dados/backups.db-shm
+dados/backups.db-wal
+
+# ─── Git ──────────────────────────────────────────────────
+.git/
+.gitignore
+.claude/
+
+# ─── Documentação e testes (não necessários em produção) ──
+docs/
+testes/
+*.md
