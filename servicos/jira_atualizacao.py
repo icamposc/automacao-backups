@@ -250,6 +250,11 @@ _CAMPOS_TRANSICAO_RESOLVIDO = {
 _ORDEM_FLUXO = ["Aguardando Suporte", "Em análise", "Escalado", "Resolvido", "Fechado"]
 
 
+def _normalizar_nome(nome: str | None) -> str:
+    """Normaliza nome de status/transição para comparação robusta a caixa e espaços."""
+    return (nome or "").strip().casefold()
+
+
 def obter_status_atual(ticket_id: str) -> str | None:
     """
     Retorna o nome do status atual do ticket.
@@ -293,13 +298,20 @@ def transicionar_para_status(ticket_id: str, status_destino: str, campos: dict =
     if not status_atual:
         return False
 
-    if status_atual == status_destino:
+    # Os nomes de status/transição do projeto SPN não têm caixa estável
+    # (ex.: status-alvo "RESOLVIDO" para a transição "Resolvido", "Em Análise"
+    # vs "Em análise"). Todas as comparações abaixo são case-insensitive para
+    # não depender da grafia exata configurada no workflow do Jira.
+    alvo = _normalizar_nome(status_destino)
+
+    if _normalizar_nome(status_atual) == alvo:
         logger.info(f"Ticket {ticket_id} já está em '{status_destino}' — transição ignorada")
         return True
 
+    fluxo = [_normalizar_nome(s) for s in _ORDEM_FLUXO]
     try:
-        pos_atual = _ORDEM_FLUXO.index(status_atual)
-        pos_destino = _ORDEM_FLUXO.index(status_destino)
+        pos_atual = fluxo.index(_normalizar_nome(status_atual))
+        pos_destino = fluxo.index(alvo)
         if pos_atual > pos_destino:
             logger.info(
                 f"Ticket {ticket_id} está em '{status_atual}' (mais avançado que '{status_destino}') "
@@ -310,7 +322,19 @@ def transicionar_para_status(ticket_id: str, status_destino: str, campos: dict =
         pass  # Status fora do fluxo conhecido — tenta transicionar normalmente
 
     transicoes = obter_transicoes_disponiveis(ticket_id)
-    transicao = next((t for t in transicoes if t["to"]["name"] == status_destino), None)
+    # Casa pelo nome da própria transição OU pelo nome do status-alvo (to.name),
+    # ambos normalizados — o Jira do SPN nomeia a transição "Resolvido" mas o
+    # status-alvo como "RESOLVIDO", e essa divergência de caixa fazia a busca
+    # antiga (t["to"]["name"] == status_destino) falhar silenciosamente.
+    transicao = next(
+        (
+            t
+            for t in transicoes
+            if _normalizar_nome(t.get("name")) == alvo
+            or _normalizar_nome((t.get("to") or {}).get("name")) == alvo
+        ),
+        None,
+    )
 
     if not transicao:
         logger.error(
