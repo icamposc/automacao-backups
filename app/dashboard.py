@@ -226,9 +226,10 @@ def api_refazer():
     return jsonify({"resultados": resultados}), 200
 
 
-# Template servido para download — mínimo, apenas cabeçalho.
-# A dica textual no dashboard já explica o formato e o limite.
-_TEMPLATE_CSV_LOTE = "email\n"
+# Template servido para download — apenas o cabeçalho.
+# 'email' é obrigatório; 'nome' e 'chamado' são opcionais (quando preenchidos,
+# o backup age no chamado real informado — senão, segue como lote anônimo).
+_TEMPLATE_CSV_LOTE = "email,nome,chamado\n"
 
 
 @bp.route("/api/backups/lote/template")
@@ -257,50 +258,73 @@ _MAX_EMAILS_POR_LOTE = 50
 _LIMITE_PARALELO = LIMITE_PARALELO_BACKUPS
 
 
-def _extrair_emails_csv(conteudo: str) -> list[str]:
+# Aliases de cabeçalho aceitos (normalizados: minúsculo, sem espaços nas pontas).
+_COLUNAS_EMAIL   = {"email", "e-mail", "e_mail"}
+_COLUNAS_NOME    = {"nome", "name", "colaborador"}
+_COLUNAS_CHAMADO = {"chamado", "ticket", "ticket_id", "ticketid",
+                    "numero", "número", "numero do chamado", "número do chamado",
+                    "nº chamado"}
+
+
+def _extrair_registros_csv(conteudo: str) -> list[dict]:
     """
-    Extrai e-mails de um conteúdo CSV.
+    Extrai registros de um conteúdo CSV: e-mail obrigatório, nome e chamado opcionais.
 
     Aceita dois formatos:
-    - CSV com cabeçalho contendo coluna 'email' (case-insensitive)
-    - CSV de coluna única sem cabeçalho (uma linha por e-mail)
+    - CSV com cabeçalho contendo a coluna 'email' (case-insensitive). Quando
+      presentes, as colunas 'nome' e 'chamado' (com aliases) também são lidas.
+    - CSV de coluna única sem cabeçalho (uma linha por e-mail) — compatibilidade
+      com o formato antigo; nome e chamado ficam vazios.
 
     Linhas em branco, comentários (#) e espaços são ignorados.
-    Preserva a ordem e remove duplicatas mantendo a 1ª ocorrência.
+    Preserva a ordem e remove duplicatas por e-mail mantendo a 1ª ocorrência.
+
+    Returns:
+        Lista de dicts {"email": str, "nome": str|None, "ticket_id": str|None}.
+        Quando 'chamado' não é informado, ticket_id vem None (o chamador então
+        gera o identificador sintético LOTE-*, como no comportamento atual).
     """
     leitor = csv.reader(io.StringIO(conteudo))
     linhas = [linha for linha in leitor if any((c or "").strip() for c in linha)]
 
     # Remove linhas de comentário no topo (#) — permite que o template tenha
-    # instruções inline antes do cabeçalho 'email'.
+    # instruções inline antes do cabeçalho.
     while linhas and (linhas[0][0] or "").strip().startswith("#"):
         linhas.pop(0)
 
     if not linhas:
         return []
 
-    # Detecta cabeçalho 'email'
-    primeira = [(c or "").strip().lower() for c in linhas[0]]
-    if "email" in primeira:
-        idx_email = primeira.index("email")
+    # Detecta cabeçalho pela presença de uma coluna de e-mail conhecida.
+    cabecalho = [(c or "").strip().lower() for c in linhas[0]]
+    if any(c in _COLUNAS_EMAIL for c in cabecalho):
+        idx_email   = next(i for i, c in enumerate(cabecalho) if c in _COLUNAS_EMAIL)
+        idx_nome    = next((i for i, c in enumerate(cabecalho) if c in _COLUNAS_NOME), None)
+        idx_chamado = next((i for i, c in enumerate(cabecalho) if c in _COLUNAS_CHAMADO), None)
         linhas_dados = linhas[1:]
     else:
-        idx_email = 0
+        # Sem cabeçalho reconhecido: coluna única = e-mail (formato antigo).
+        idx_email, idx_nome, idx_chamado = 0, None, None
         linhas_dados = linhas
 
-    emails: list[str] = []
+    def _celula(linha: list, idx) -> str:
+        if idx is None or idx >= len(linha):
+            return ""
+        return (linha[idx] or "").strip()
+
+    registros: list[dict] = []
     vistos: set[str] = set()
     for linha in linhas_dados:
-        if idx_email >= len(linha):
+        email = _celula(linha, idx_email).lower()
+        if not email or email.startswith("#"):
             continue
-        valor = (linha[idx_email] or "").strip().lower()
-        if not valor or valor.startswith("#"):
+        if email in vistos:
             continue
-        if valor in vistos:
-            continue
-        vistos.add(valor)
-        emails.append(valor)
-    return emails
+        vistos.add(email)
+        nome = _celula(linha, idx_nome) or None
+        ticket = _celula(linha, idx_chamado).upper() or None
+        registros.append({"email": email, "nome": nome, "ticket_id": ticket})
+    return registros
 
 
 @bp.route("/api/backups/lote", methods=["POST"])
@@ -311,6 +335,11 @@ def api_iniciar_lote():
     Form-data:
         arquivo       (obrigatório): arquivo .csv (UTF-8). Aceita coluna 'email'
                                      com cabeçalho ou uma coluna única sem cabeçalho.
+                                     Colunas opcionais 'nome' e 'chamado': quando
+                                     preenchidas, o backup age no chamado real
+                                     informado (comentário, formulários, transição
+                                     para Resolvido). Sem 'chamado', mantém o
+                                     comportamento de lote (ticket sintético LOTE-*).
         deletar_conta (opcional):    "true"/"false" (padrão "true"). Aplicado a
                                      todos os e-mails do lote.
 
@@ -336,16 +365,16 @@ def api_iniciar_lote():
     deletar_conta_raw = (request.form.get("deletar_conta") or "true").strip().lower()
     deletar_conta = deletar_conta_raw in ("true", "1", "sim", "on", "yes")
 
-    emails_brutos = _extrair_emails_csv(conteudo)
+    registros = _extrair_registros_csv(conteudo)
 
-    if not emails_brutos:
+    if not registros:
         return jsonify({"erro": "Nenhum e-mail encontrado no arquivo"}), 400
 
-    if len(emails_brutos) > _MAX_EMAILS_POR_LOTE:
+    if len(registros) > _MAX_EMAILS_POR_LOTE:
         return jsonify({
             "erro": (
                 f"Lote excede o limite de {_MAX_EMAILS_POR_LOTE} e-mails por upload "
-                f"(recebido: {len(emails_brutos)}). Divida em arquivos menores e "
+                f"(recebido: {len(registros)}). Divida em arquivos menores e "
                 f"envie em sequência — os backups serão enfileirados na ordem."
             )
         }), 400
@@ -355,16 +384,20 @@ def api_iniciar_lote():
     ja_em_processamento: list[str] = []
     invalidos: list[str] = []
 
-    for indice, email in enumerate(emails_brutos, start=1):
+    for indice, registro in enumerate(registros, start=1):
+        email = registro["email"]
         if not _REGEX_EMAIL.match(email):
             invalidos.append(email)
             continue
         if esta_em_processamento(email):
             ja_em_processamento.append(email)
             continue
-        ticket_id = f"LOTE-{timestamp}-{indice:03d}"
+        # Usa o chamado real informado no CSV; sem ele, mantém o ticket
+        # sintético LOTE-* (comportamento anterior). O nome segue o mesmo
+        # critério: o que veio no CSV, ou None.
+        ticket_id = registro["ticket_id"] or f"LOTE-{timestamp}-{indice:03d}"
         try:
-            iniciar_backup_async(email, ticket_id, None, deletar_conta=deletar_conta)
+            iniciar_backup_async(email, ticket_id, registro["nome"], deletar_conta=deletar_conta)
             aceitos.append({"email": email, "ticket_id": ticket_id})
         except Exception as erro:
             logger.error(f"Falha ao enfileirar backup em lote para {email}: {erro}")
@@ -379,7 +412,7 @@ def api_iniciar_lote():
     return jsonify({
         "status": "concluido",
         "deletar_conta": deletar_conta,
-        "total_linhas":  len(emails_brutos),
+        "total_linhas":  len(registros),
         "aceitos":              aceitos,
         "ja_em_processamento":  ja_em_processamento,
         "invalidos":            invalidos,
