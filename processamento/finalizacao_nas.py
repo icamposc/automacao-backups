@@ -65,7 +65,11 @@ def finalizar_backups_pendentes() -> dict:
         listar_prontos_para_finalizar,
         finalizar_backup,
     )
-    from servicos.jira_atualizacao import comentar_sucesso, transicionar_resolvido
+    from servicos.jira_atualizacao import (
+        comentar_sucesso,
+        submeter_formularios_pendentes,
+        transicionar_resolvido,
+    )
     from servicos.conta_exclusao import deletar_conta
     from servicos.google_chat import (
         notificar_sucesso as chat_sucesso,
@@ -95,9 +99,14 @@ def finalizar_backups_pendentes() -> dict:
             #    o backup nao volta a aparecer na proxima varredura.
             finalizar_backup(email, sucesso=True, link_drive=link, sha256_zip=sha)
 
-            # 2) Jira: comentario de sucesso + transicao para resolvido
+            # 2) Jira: comentario de sucesso + submissao dos formularios
+            #    ProForma + transicao para resolvido. A tela de transicao
+            #    "Resolvido" do SPN rejeita o POST (HTTP 400) se houver
+            #    formularios anexados nao enviados — por isso submetemos antes,
+            #    igual ao fluxo do orquestrador.
             try:
                 comentar_sucesso(ticket, email, link, deletar_conta=del_conta)
+                submeter_formularios_pendentes(ticket)
                 transicionar_resolvido(ticket)
             except Exception as erro:
                 logger.error(f"Falha ao atualizar Jira do ticket {ticket}: {erro}")
