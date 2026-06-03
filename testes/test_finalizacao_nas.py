@@ -21,6 +21,14 @@ def banco_isolado(banco_teste):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_submeter_formularios():
+    """Neutraliza a submissao de formularios ProForma (chamada externa ao Jira)
+    em todos os testes — o foco aqui e o fluxo de finalizacao, nao a API."""
+    with patch("servicos.jira_atualizacao.submeter_formularios_pendentes", return_value=True):
+        yield
+
+
 def _criar_backup_aguardando_nas(
     email: str,
     ticket_id: str,
