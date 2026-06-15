@@ -37,6 +37,7 @@ from processamento.rastreador import (
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from config.configuracoes import LIMITE_PARALELO_BACKUPS
 from utils.logger import obter_logger
+from utils import auditoria
 
 logger = obter_logger("dashboard")
 
@@ -157,6 +158,7 @@ def api_iniciar_manual():
         ticket_id = f"MANUAL-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     if esta_em_processamento(email):
+        auditoria.registrar("backup_manual", resultado="ja_em_processamento", email=email)
         return jsonify({
             "erro": f"Já existe um backup em andamento para {email}",
             "status": "ja_em_processamento",
@@ -166,6 +168,10 @@ def api_iniciar_manual():
     logger.info(
         f"Backup manual iniciado — E-mail: {email}, Ticket: {ticket_id}, "
         f"Nome: {nome}, Deletar conta: {deletar_conta}"
+    )
+    auditoria.registrar(
+        "backup_manual", resultado="iniciado",
+        email=email, ticket=ticket_id, deletar_conta=deletar_conta,
     )
 
     return jsonify({
@@ -223,6 +229,12 @@ def api_refazer():
             logger.error(f"Falha ao reenfileirar (refazer) {email}: {erro}")
             resultados.append({"email": email, "status": "erro", "motivo": str(erro)})
 
+    iniciados = [r["email"] for r in resultados if r["status"] == "iniciado"]
+    auditoria.registrar(
+        "backup_refazer", resultado="ok",
+        total=len(resultados), reenfileirados=len(iniciados),
+        emails=",".join(iniciados) if iniciados else "-",
+    )
     return jsonify({"resultados": resultados}), 200
 
 
@@ -407,6 +419,12 @@ def api_iniciar_lote():
         f"Lote CSV processado — arquivo: {arquivo.filename}, "
         f"aceitos: {len(aceitos)}, em_processamento: {len(ja_em_processamento)}, "
         f"invalidos: {len(invalidos)}, deletar_conta: {deletar_conta}"
+    )
+    auditoria.registrar(
+        "backup_lote", resultado="ok",
+        arquivo=arquivo.filename, total_linhas=len(registros),
+        aceitos=len(aceitos), ja_em_processamento=len(ja_em_processamento),
+        invalidos=len(invalidos), deletar_conta=deletar_conta,
     )
 
     return jsonify({

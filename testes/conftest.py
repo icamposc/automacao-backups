@@ -5,6 +5,7 @@ Fornece mocks reutilizáveis para as APIs externas (Google, Jira)
 e configurações isoladas de ambiente de teste.
 """
 
+import logging
 import os
 import sys
 import pytest
@@ -15,6 +16,14 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
+
+# Impede que os testes escrevam na trilha de auditoria real
+# (logs/auditoria/auditoria.log). Pré-configura o logger "auditoria" com um
+# NullHandler: como utils.auditoria só adiciona handlers se ainda não houver,
+# isso anula a escrita em arquivo/console durante os testes.
+_aud_logger = logging.getLogger("auditoria")
+_aud_logger.addHandler(logging.NullHandler())
+_aud_logger.propagate = False
 
 # Pré-mocka os módulos do Celery para evitar conexão real com Redis durante testes.
 # Isso deve acontecer ANTES de qualquer importação dos módulos do projeto.
