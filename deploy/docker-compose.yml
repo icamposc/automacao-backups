@@ -59,6 +59,17 @@ services:
       - automacao_net
     env_file:
       - ../.env       # path RELATIVO ao diretorio do compose (deploy/)
+      # ── Login do painel (autenticação) — DEFINIR no .env de produção ──
+      # Vêm do .env (NÃO colocar em `environment:`, pois há segredos):
+      #   FLASK_SECRET_KEY        (gerar na VM; fixa p/ os 2 workers)
+      #   AD_SERVIDOR             (ex.: madeiramadeira.local)
+      #   AD_DOMINIO_UPN          (ex.: madeiramadeira.local)
+      #   AD_BASE_DN              (ex.: DC=madeiramadeira,DC=local)
+      #   AD_GRUPO_AUTORIZADO     (ex.: MM - Backup - Admins)
+      #   AD_USAR_SSL / AD_PORTA / AD_VALIDAR_CERT
+      #   ADM_LOCAL_USUARIO / ADM_LOCAL_SENHA_HASH   (admin local break-glass)
+      #   SESSION_COOKIE_SECURE   (true se atrás de HTTPS)
+      # Sem essas variáveis, o /dashboard fica inacessível (login falha).
     environment:
       TZ: America/Sao_Paulo
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
