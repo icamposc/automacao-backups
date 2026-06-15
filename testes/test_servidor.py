@@ -36,9 +36,25 @@ def healthchecks_ok(mocker):
     return {"celery": mock_celery}
 
 
+@pytest.fixture
+def cliente_admin(cliente_flask):
+    """
+    Cliente de teste com sessão de admin já autenticada.
+
+    O payload detalhado de /health e /saude (componentes, contadores, PII)
+    só é exposto para usuários logados — sem sessão, a resposta é mínima.
+    """
+    with cliente_flask.session_transaction() as sess:
+        sess["usuario"] = "admin.teste"
+        sess["nome"] = "Admin Teste"
+    return cliente_flask
+
+
 class TestHealthCheck:
-    def test_health_ok_quando_tudo_saudavel(self, cliente_flask, healthchecks_ok):
-        resp = cliente_flask.get("/health")
+    """Corpo DETALHADO — exige sessão de admin (cliente_admin)."""
+
+    def test_health_ok_quando_tudo_saudavel(self, cliente_admin, healthchecks_ok):
+        resp = cliente_admin.get("/health")
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["status"] == "ok"
@@ -48,30 +64,30 @@ class TestHealthCheck:
         assert body["componentes"]["disco"] == "ok"
         assert body["backups_stuck"] == []
 
-    def test_health_503_quando_celery_sem_workers(self, cliente_flask, healthchecks_ok):
+    def test_health_503_quando_celery_sem_workers(self, cliente_admin, healthchecks_ok):
         """Worker em D-state: Redis up, mas inspect ping nao retorna."""
         healthchecks_ok["celery"].control.inspect.return_value.ping.return_value = None
 
-        resp = cliente_flask.get("/health")
+        resp = cliente_admin.get("/health")
         assert resp.status_code == 503
         body = resp.get_json()
         assert body["status"] == "degradado"
         assert body["componentes"]["celery"] == "sem_workers"
 
-    def test_health_503_quando_disco_abaixo_do_threshold(self, cliente_flask, healthchecks_ok, mocker):
+    def test_health_503_quando_disco_abaixo_do_threshold(self, cliente_admin, healthchecks_ok, mocker):
         # 5% livre — abaixo do limite de 10%
         mocker.patch(
             "shutil.disk_usage",
             return_value=_DiskUsage(total=400 * 1024 ** 3, used=380 * 1024 ** 3, free=20 * 1024 ** 3),
         )
-        resp = cliente_flask.get("/health")
+        resp = cliente_admin.get("/health")
         assert resp.status_code == 503
         body = resp.get_json()
         assert "degradado" in body["componentes"]["disco"]
         assert body["componentes"]["disco_detalhe"]["livre_pct"] == pytest.approx(5.0, abs=0.5)
 
-    def test_health_inclui_disco_detalhe(self, cliente_flask, healthchecks_ok):
-        resp = cliente_flask.get("/health")
+    def test_health_inclui_disco_detalhe(self, cliente_admin, healthchecks_ok):
+        resp = cliente_admin.get("/health")
         body = resp.get_json()
         detalhe = body["componentes"]["disco_detalhe"]
         assert "total_gb" in detalhe
@@ -79,7 +95,7 @@ class TestHealthCheck:
         assert "livre_pct" in detalhe
         assert detalhe["livre_gb"] > 0
 
-    def test_health_503_quando_backup_stuck(self, cliente_flask, healthchecks_ok):
+    def test_health_503_quando_backup_stuck(self, cliente_admin, healthchecks_ok):
         """Backup em_andamento há > 12h dispara degradado."""
         from dados.banco import obter_conexao
 
@@ -93,14 +109,14 @@ class TestHealthCheck:
         )
         conn.commit()
 
-        resp = cliente_flask.get("/health")
+        resp = cliente_admin.get("/health")
         assert resp.status_code == 503
         body = resp.get_json()
         assert len(body["backups_stuck"]) == 1
         assert body["backups_stuck"][0]["email"] == "stuck@x.com"
         assert body["backups_stuck"][0]["idade_horas"] >= 12
 
-    def test_health_nao_lista_backup_recente_como_stuck(self, cliente_flask, healthchecks_ok):
+    def test_health_nao_lista_backup_recente_como_stuck(self, cliente_admin, healthchecks_ok):
         from dados.banco import obter_conexao
 
         recente = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -112,17 +128,42 @@ class TestHealthCheck:
         )
         conn.commit()
 
-        resp = cliente_flask.get("/health")
+        resp = cliente_admin.get("/health")
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["backups_stuck"] == []
 
 
+class TestHealthPublico:
+    """Corpo PÚBLICO (sem sessão) — mínimo, sem componentes nem PII."""
+
+    def test_health_publico_e_minimo_e_sem_pii(self, cliente_flask, healthchecks_ok):
+        resp = cliente_flask.get("/health")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        # Só o essencial
+        assert body["status"] == "ok"
+        assert "timestamp" in body
+        # NÃO expõe diagnóstico nem dados sensíveis sem login
+        for campo in ("componentes", "backups_stuck", "ultima_execucao",
+                      "resumo", "backups_em_andamento"):
+            assert campo not in body
+
+    def test_health_publico_preserva_codigo_503(self, cliente_flask, healthchecks_ok):
+        # Docker depende do código HTTP, não do corpo.
+        healthchecks_ok["celery"].control.inspect.return_value.ping.return_value = None
+        resp = cliente_flask.get("/health")
+        assert resp.status_code == 503
+        body = resp.get_json()
+        assert body["status"] == "degradado"
+        assert "componentes" not in body
+
+
 class TestSaudeAlias:
-    def test_saude_delega_para_health(self, cliente_flask, healthchecks_ok):
+    def test_saude_delega_para_health(self, cliente_admin, healthchecks_ok):
         """/saude deve retornar o mesmo conteúdo e status que /health."""
-        resp_saude = cliente_flask.get("/saude")
-        resp_health = cliente_flask.get("/health")
+        resp_saude = cliente_admin.get("/saude")
+        resp_health = cliente_admin.get("/health")
 
         assert resp_saude.status_code == resp_health.status_code
         body_saude = resp_saude.get_json()

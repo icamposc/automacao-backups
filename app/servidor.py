@@ -17,12 +17,20 @@ Histórico:
 ============================================================
 """
 
+import os
 import threading
+from datetime import timedelta
 
 from flask import Flask, request, jsonify
 
 from app.webhook_handler import validar_segredo_webhook, extrair_dados_webhook
 from app.dashboard import bp as dashboard_bp
+from app.autenticacao import bp as auth_bp, exigir_login, usuario_logado
+from config.configuracoes import (
+    FLASK_SECRET_KEY,
+    SESSION_COOKIE_SECURE,
+    SESSION_HORAS,
+)
 from processamento.orquestrador import iniciar_backup_async, esta_em_processamento
 from dados.repositorio_backups import existe_backup_concluido_por_ticket
 from processamento.limpeza import limpar_logs_antigos, limpar_zips_sincronizados
@@ -40,8 +48,34 @@ app = Flask(__name__)
 # Limite de tamanho do payload (protege contra requisições maliciosas gigantes)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 
-# Registra o Blueprint do Dashboard
+# ── Sessão / login ─────────────────────────────────────────────────────────
+# A chave deve ser fixa em produção (Gunicorn --workers 2 compartilham a
+# mesma sessão). Sem FLASK_SECRET_KEY no .env, gera uma aleatória apenas para
+# dev/teste — nesse caso as sessões não sobrevivem a reinício nem são
+# compartilhadas entre workers.
+if FLASK_SECRET_KEY:
+    app.secret_key = FLASK_SECRET_KEY
+else:
+    app.secret_key = os.urandom(32)
+    logger.warning(
+        "FLASK_SECRET_KEY não definida — usando chave aleatória temporária. "
+        "Defina FLASK_SECRET_KEY no .env para produção (Gunicorn com 2 workers)."
+    )
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=SESSION_COOKIE_SECURE,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=SESSION_HORAS),
+)
+
+# Registra os Blueprints (login + dashboard) e o guard de proteção.
+# O guard roda antes de cada requisição e exige login para as rotas do
+# blueprint 'dashboard' (/dashboard e /api/backups/*). Webhook (HMAC),
+# /health e a tela de login permanecem abertos.
+app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp)
+app.before_request(exigir_login)
 
 # ── Inicialização na carga do módulo ───────────────────────────────────────
 # banco e recuperação são síncronos (necessários antes da 1ª requisição)
@@ -147,10 +181,28 @@ def health_check():
     Status HTTP:
     - 200 quando status_geral == "ok"
     - 503 quando degradado (essencial para o healthcheck do Docker)
+
+    Corpo da resposta:
+    - Sem sessão (público): apenas o mínimo — status/versão/timestamp. NÃO
+      expõe componentes, contadores nem PII (e-mails de colaboradores,
+      tickets), evitando que o /health vire um vazamento de dados do painel.
+    - Com sessão de admin: payload completo de diagnóstico.
+
+    O healthcheck do Docker usa apenas o código HTTP (200/503), então o corpo
+    mínimo não o afeta.
     """
     status_geral, payload = coletar_status_saude()
     http_status = 200 if status_geral == "ok" else 503
-    return jsonify(payload), http_status
+
+    if usuario_logado():
+        corpo = payload
+    else:
+        corpo = {
+            "status":    status_geral,
+            "versao":    payload.get("versao"),
+            "timestamp": payload.get("timestamp"),
+        }
+    return jsonify(corpo), http_status
 
 
 @app.route("/", methods=["GET"])
@@ -162,6 +214,8 @@ def raiz():
             "webhook":     "POST /webhook/backup-desligado",
             "health":      "GET /health",
             "health_v1":   "GET /saude",
+            "login":       "GET/POST /login",
+            "logout":      "GET /logout",
             "dashboard":   "GET /dashboard",
             "api_ativos":  "GET /api/backups/ativos",
             "api_historico": "GET /api/backups/historico",

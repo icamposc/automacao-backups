@@ -55,6 +55,28 @@
             color: var(--cor-texto-suave);
         }
 
+        .cabecalho-direita {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .link-logout {
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            text-decoration: none;
+            border: 1px solid var(--cor-borda);
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .link-logout:hover {
+            background: var(--cor-erro);
+            border-color: var(--cor-erro);
+            color: #fff;
+        }
+
         .indicador-online {
             width: 8px;
             height: 8px;
@@ -625,10 +647,13 @@
 <body>
     <header class="cabecalho">
         <h1>Automação de Backups — Dashboard</h1>
-        <div class="status-conexao">
-            <div class="indicador-online"></div>
-            <span>Atualização automática a cada 10s</span>
-            <span class="auto-refresh" id="ultima-atualizacao"></span>
+        <div class="cabecalho-direita">
+            <div class="status-conexao">
+                <div class="indicador-online"></div>
+                <span>Atualização automática a cada 10s</span>
+                <span class="auto-refresh" id="ultima-atualizacao"></span>
+            </div>
+            <a class="link-logout" href="/logout" title="Encerrar sessão">Sair</a>
         </div>
     </header>
 
@@ -789,13 +814,36 @@
         // Intervalo de atualização automática (milissegundos)
         const INTERVALO_ATUALIZACAO = 10000;
 
+        // Interceptador global de fetch: se a sessão expirar, o backend
+        // responde 401 nas rotas /api/*. Nesse caso, redireciona para o login.
+        (function () {
+            const fetchOriginal = window.fetch;
+            window.fetch = async function (...args) {
+                const resposta = await fetchOriginal.apply(this, args);
+                if (resposta.status === 401) {
+                    window.location.href = '/login';
+                }
+                return resposta;
+            };
+        })();
+
         /**
          * Formata uma data ISO para exibição legível
          */
         function formatarData(dataISO) {
             if (!dataISO) return '—';
-            const data = new Date(dataISO);
+            // Os horários são gravados em UTC. Se a string não trouxer fuso
+            // explícito (nem 'Z' nem offset ±hh:mm), assumimos UTC — senão o
+            // navegador a interpretaria como hora local e exibiria adiantada.
+            let iso = dataISO;
+            if (iso.includes('T') && !/(Z|[+-]\d{2}:?\d{2})$/.test(iso)) {
+                iso += 'Z';
+            }
+            const data = new Date(iso);
+            // Fixa a exibição no horário de Brasília, independentemente do fuso
+            // do navegador/servidor de quem acessa o painel.
             return data.toLocaleString('pt-BR', {
+                timeZone: 'America/Sao_Paulo',
                 day: '2-digit', month: '2-digit', year: 'numeric',
                 hour: '2-digit', minute: '2-digit', second: '2-digit',
             });
@@ -958,9 +1006,9 @@
                 // Sincroniza estado do painel de retry após atualização da tabela
                 atualizarPainelRefazer();
 
-                // Atualizar timestamp
+                // Atualizar timestamp (sempre em horário de Brasília)
                 document.getElementById('ultima-atualizacao').textContent =
-                    `Última: ${new Date().toLocaleTimeString('pt-BR')}`;
+                    `Última: ${new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
 
             } catch (erro) {
                 console.error('Erro ao atualizar dashboard:', erro);

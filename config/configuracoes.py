@@ -226,3 +226,84 @@ SQLITE_PATH = (
 # Redis (broker do Celery)
 # ============================================================
 REDIS_URL = _obter_variavel("REDIS_URL", obrigatoria=False, padrao="redis://localhost:6379/0")
+
+# ============================================================
+# Autenticação no Active Directory (login do dashboard)
+# ============================================================
+# O acesso ao /dashboard e às rotas /api/backups/* exige login no AD.
+# A autenticação é por bind direto com a credencial do próprio usuário
+# (via UPN) e o acesso é restrito aos membros do grupo AD_GRUPO_AUTORIZADO.
+#
+# Estas variáveis NÃO têm valor real padrão (devem ser preenchidas no .env).
+# São opcionais na carga para não quebrar testes/health quando o AD não está
+# configurado — a ausência é validada apenas no momento de um login real.
+
+# Alvo LDAP. Com vários DCs do mesmo domínio (HA), prefira o NOME DO DOMÍNIO
+# (ex.: "madeiramadeira.local") — o DNS resolve para todos os DCs. Também
+# aceita uma LISTA separada por vírgula de DCs (FQDN/IP), que vira um pool com
+# failover. Evite IP único: se aquele DC cair, o login para.
+AD_SERVIDOR = _obter_variavel("AD_SERVIDOR", obrigatoria=False, padrao="")
+
+# Porta LDAP. Padrão 636 (LDAPS). Use 389 para LDAP sem TLS.
+AD_PORTA = int(_obter_variavel("AD_PORTA", obrigatoria=False, padrao="636"))
+
+# Usar LDAPS (TLS). "true"/"false". Padrão true (recomendado).
+AD_USAR_SSL = _obter_variavel("AD_USAR_SSL", obrigatoria=False, padrao="true").strip().lower() in (
+    "true", "1", "sim", "on", "yes"
+)
+
+# Validar o certificado do servidor AD. "true"/"false". Padrão true.
+# Defina "false" apenas se o controlador usa certificado autoassinado e não
+# há como confiar na CA corporativa no contêiner.
+AD_VALIDAR_CERT = _obter_variavel("AD_VALIDAR_CERT", obrigatoria=False, padrao="true").strip().lower() in (
+    "true", "1", "sim", "on", "yes"
+)
+
+# Sufixo UPN do domínio, usado para montar usuario@dominio no bind.
+# Ex.: "madeiramadeira.com.br"
+AD_DOMINIO_UPN = _obter_variavel("AD_DOMINIO_UPN", obrigatoria=False, padrao="")
+
+# DN base para buscar o usuário e o grupo. Ex.: "DC=madeiramadeira,DC=com,DC=br"
+AD_BASE_DN = _obter_variavel("AD_BASE_DN", obrigatoria=False, padrao="")
+
+# Nome (CN) do grupo do AD cujos membros têm acesso ao dashboard.
+AD_GRUPO_AUTORIZADO = _obter_variavel(
+    "AD_GRUPO_AUTORIZADO", obrigatoria=False, padrao="MM - Backup - Admins"
+)
+
+# Timeout (segundos) para conectar ao servidor AD.
+AD_TIMEOUT = int(_obter_variavel("AD_TIMEOUT", obrigatoria=False, padrao="10"))
+
+# ============================================================
+# Usuário administrador LOCAL (break-glass, sem AD)
+# ============================================================
+# Conta de emergência para acessar o painel quando o AD estiver indisponível
+# ou antes de o login corporativo estar configurado. NÃO usa AD: valida
+# usuário + senha localmente. A senha é guardada apenas como HASH (Werkzeug),
+# nunca em texto puro. Gere o hash com:
+#   python -c "from werkzeug.security import generate_password_hash as g; print(g('SUA_SENHA'))"
+#
+# O login local só fica ATIVO se as DUAS variáveis estiverem preenchidas.
+# Use um nome que NÃO exista no AD (ex.: admin.local) para evitar colisão.
+ADM_LOCAL_USUARIO = _obter_variavel("ADM_LOCAL_USUARIO", obrigatoria=False, padrao="")
+ADM_LOCAL_SENHA_HASH = _obter_variavel("ADM_LOCAL_SENHA_HASH", obrigatoria=False, padrao="")
+
+# ============================================================
+# Sessão do Flask (cookie de login)
+# ============================================================
+# Chave usada para assinar o cookie de sessão. DEVE ser fixa e secreta em
+# produção: o Gunicorn roda com --workers 2 e ambos precisam compartilhar a
+# mesma chave, senão o login cai a cada troca de worker. Se vazia, o servidor
+# gera uma chave aleatória no startup (apenas para dev/teste — sessões não
+# sobrevivem a reinício nem são compartilhadas entre workers).
+FLASK_SECRET_KEY = _obter_variavel("FLASK_SECRET_KEY", obrigatoria=False, padrao="")
+
+# Enviar o cookie de sessão apenas por HTTPS. "true"/"false". Padrão false
+# (acesso interno por HTTP). Defina "true" quando o dashboard estiver atrás
+# de HTTPS/proxy TLS.
+SESSION_COOKIE_SECURE = _obter_variavel(
+    "SESSION_COOKIE_SECURE", obrigatoria=False, padrao="false"
+).strip().lower() in ("true", "1", "sim", "on", "yes")
+
+# Tempo de vida da sessão de login, em horas. Padrão 8 (uma jornada).
+SESSION_HORAS = int(_obter_variavel("SESSION_HORAS", obrigatoria=False, padrao="8"))

@@ -46,7 +46,10 @@ services:
     networks:
       - automacao_net
     env_file: .env
+    # Login do painel (FLASK_SECRET_KEY, AD_*, ADM_LOCAL_*, SESSION_*) vem do
+    # .env via env_file. Sem essas variáveis, o /dashboard fica inacessível.
     environment:
+      TZ: America/Sao_Paulo
       REDIS_URL: redis://redis:6379/0
       SQLITE_PATH: /app/storage/backups.db
       PASTA_LOGS: /app/logs
@@ -99,6 +102,7 @@ services:
       - automacao_net
     env_file: .env
     environment:
+      TZ: America/Sao_Paulo
       REDIS_URL: redis://redis:6379/0
       SQLITE_PATH: /app/storage/backups.db
       PASTA_LOGS: /app/logs

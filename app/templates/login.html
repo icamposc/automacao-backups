@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entrar — Automação de Backups</title>
+    <style>
+        :root {
+            --cor-fundo: #0f172a;
+            --cor-superficie: #1e293b;
+            --cor-borda: #334155;
+            --cor-texto: #e2e8f0;
+            --cor-texto-suave: #94a3b8;
+            --cor-primaria: #3b82f6;
+            --cor-primaria-hover: #2563eb;
+            --cor-erro: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--cor-fundo);
+            color: var(--cor-texto);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .cartao {
+            background: var(--cor-superficie);
+            border: 1px solid var(--cor-borda);
+            border-radius: 12px;
+            padding: 2.5rem 2rem;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        .cartao h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            text-align: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .cartao .subtitulo {
+            font-size: 0.85rem;
+            color: var(--cor-texto-suave);
+            text-align: center;
+            margin-bottom: 1.75rem;
+        }
+
+        .campo { margin-bottom: 1.1rem; }
+
+        .campo label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--cor-texto-suave);
+            margin-bottom: 0.4rem;
+        }
+
+        .campo input {
+            width: 100%;
+            padding: 0.65rem 0.8rem;
+            background: var(--cor-fundo);
+            border: 1px solid var(--cor-borda);
+            border-radius: 8px;
+            color: var(--cor-texto);
+            font-size: 0.95rem;
+            transition: border-color 0.15s;
+        }
+
+        .campo input:focus {
+            outline: none;
+            border-color: var(--cor-primaria);
+        }
+
+        .botao {
+            width: 100%;
+            padding: 0.7rem;
+            margin-top: 0.4rem;
+            background: var(--cor-primaria);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .botao:hover { background: var(--cor-primaria-hover); }
+
+        .erro {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid var(--cor-erro);
+            color: #fca5a5;
+            font-size: 0.82rem;
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+        }
+
+        .rodape {
+            margin-top: 1.5rem;
+            font-size: 0.72rem;
+            color: var(--cor-texto-suave);
+            text-align: center;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="cartao">
+        <h1>Automação de Backups</h1>
+        <p class="subtitulo">Acesso restrito — autenticação corporativa</p>
+
+        {% if erro %}
+        <div class="erro">{{ erro }}</div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('auth.login') }}" autocomplete="off">
+            <input type="hidden" name="next" value="{{ proximo }}">
+
+            <div class="campo">
+                <label for="usuario">Usuário</label>
+                <input type="text" id="usuario" name="usuario"
+                       placeholder="Seu login" required autofocus
+                       autocapitalize="off" autocorrect="off" spellcheck="false">
+            </div>
+
+            <div class="campo">
+                <label for="senha">Senha</label>
+                <input type="password" id="senha" name="senha"
+                       placeholder="••••••••" required>
+            </div>
+
+            <button type="submit" class="botao">Entrar</button>
+        </form>
+
+        <p class="rodape">
+            Use seu usuário de rede (Active Directory) — apenas o usuário, sem @domínio.<br>
+            O acesso é restrito ao grupo autorizado.
+        </p>
+    </div>
+</body>
+</html>
