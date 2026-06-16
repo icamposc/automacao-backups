@@ -6,7 +6,8 @@
 |---|---|
 | Servidor | On-premise com Proxmox |
 | VM | Ubuntu Server 24.04 LTS |
-| IP | 10.100.210.200/24 |
+| Hostname | `mcta-automacao` |
+| IP | 10.100.80.10/24 |
 | Disco SSD | 80GB — OS + Docker + SQLite + Redis |
 | Disco HDD | 4TB (`/dev/sdb1`) — montado em `/mnt/hdd` |
 | Pasta Vault | `/mnt/hdd/vault` — exports PST/ZIP do Google Vault |
@@ -22,7 +23,10 @@ cd /opt/automacao-backups
 docker build -t automacao-backups:latest .
 ```
 
-Gerenciado via **Portainer** (`https://10.100.210.200:9443`).
+Gerenciado via **Portainer** (`https://10.100.80.10:9443`).
+
+> O Compose ativo em produção é o de `deploy/` (`/opt/automacao-backups/deploy/docker-compose.yml`,
+> projeto Compose `deploy`). A imagem usa o `Dockerfile` da raiz.
 
 ---
 
@@ -30,9 +34,9 @@ Gerenciado via **Portainer** (`https://10.100.210.200:9443`).
 
 | Container | Imagem | Função |
 |---|---|---|
-| `automacao-backups-redis-1` | `redis:7-alpine` | Broker Celery |
-| `automacao-backups-servidor-1` | `automacao-backups:latest` | Flask + Gunicorn (porta 5000) |
-| `automacao-backups-worker-1` | `automacao-backups:latest` | Celery 10 threads |
+| `automacao_backups_redis` | `redis:7-alpine` | Broker Celery |
+| `automacao_backups_servidor` | `automacao-backups:latest` | Flask + Gunicorn (porta 5000) |
+| `automacao_backups_worker` | `automacao-backups:latest` | Celery 10 threads |
 
 ---
 
@@ -51,7 +55,7 @@ Gerenciado via **Portainer** (`https://10.100.210.200:9443`).
 
 ## Variáveis de ambiente sobrescritas pelo docker-compose
 
-Estas variáveis são definidas no `docker-compose.yml` e sobrescrevem o `.env`:
+Estas variáveis são definidas no `deploy/docker-compose.yml` e sobrescrevem o `.env`:
 
 | Variável | Valor em Produção |
 |---|---|
@@ -70,17 +74,18 @@ Estas variáveis são definidas no `docker-compose.yml` e sobrescrevem o `.env`:
 docker ps
 
 # Logs do worker
-docker logs automacao-backups-worker-1 --tail 50 -f
+docker logs automacao_backups_worker --tail 50 -f
 
 # Logs do servidor
-docker logs automacao-backups-servidor-1 --tail 50 -f
+docker logs automacao_backups_servidor --tail 50 -f
 
 # Health check
-curl http://10.100.210.200:5000/health
+curl http://10.100.80.10:5000/health
 
 # Rebuild e redeploy após atualização de código
 cd /opt/automacao-backups
 docker build -t automacao-backups:latest .
+cd deploy
 docker compose up -d --force-recreate servidor worker
 ```
 
