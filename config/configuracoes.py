@@ -17,11 +17,44 @@ import json
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 # Carrega o arquivo .env que fica na raiz do projeto (um nível acima de /config)
 _RAIZ_PROJETO = Path(__file__).resolve().parent.parent
-load_dotenv(_RAIZ_PROJETO / ".env")
+_CAMINHO_ENV = _RAIZ_PROJETO / ".env"
+load_dotenv(_CAMINHO_ENV)
+
+# Valores lidos LITERALMENTE do .env (sem interpolação). Usado por
+# _ler_secret_literal para segredos que podem conter '$' (ver abaixo).
+_VALORES_ENV_LITERAIS = (
+    dotenv_values(_CAMINHO_ENV, interpolate=False) if _CAMINHO_ENV.exists() else {}
+)
+
+
+def _resolver_secret(valores_arquivo: dict, ambiente: dict, nome: str, padrao: str = "") -> str:
+    """Prefere o valor literal do arquivo .env; recai para o ambiente."""
+    valor = valores_arquivo.get(nome)
+    if valor is not None:
+        return valor
+    return ambiente.get(nome, padrao)
+
+
+def _ler_secret_literal(nome: str, padrao: str = "") -> str:
+    """
+    Lê um segredo preservando seu valor LITERAL do arquivo .env.
+
+    Segredos que contêm '$' — como o hash do admin local (formato
+    scrypt/pbkdf2 do Werkzeug, ex.: 'scrypt:...$salt$hash') — são corrompidos
+    quando entregues ao container via `env_file` do docker compose: o compose
+    trata '$' como interpolação de variável e remove o trecho (o salt some),
+    fazendo a senha nunca validar. Lendo direto do arquivo .env (que é montado
+    no container), sem interpolação, o valor chega íntegro. Recai para a
+    variável de ambiente quando a chave não existe no arquivo (ex.: deploy que
+    define tudo por `environment:` sem .env). Assim o .env permanece canônico
+    (hash cru, como o script definir_senha_admin_local.py grava) e não há
+    necessidade de escapar '$' como '$$' (o que quebraria a leitura em dev).
+    """
+    return _resolver_secret(_VALORES_ENV_LITERAIS, os.environ, nome, padrao)
 
 
 # ============================================================
@@ -286,7 +319,9 @@ AD_TIMEOUT = int(_obter_variavel("AD_TIMEOUT", obrigatoria=False, padrao="10"))
 # O login local só fica ATIVO se as DUAS variáveis estiverem preenchidas.
 # Use um nome que NÃO exista no AD (ex.: admin.local) para evitar colisão.
 ADM_LOCAL_USUARIO = _obter_variavel("ADM_LOCAL_USUARIO", obrigatoria=False, padrao="")
-ADM_LOCAL_SENHA_HASH = _obter_variavel("ADM_LOCAL_SENHA_HASH", obrigatoria=False, padrao="")
+# Lido LITERALMENTE do .env: o hash Werkzeug contém '$' e seria corrompido pela
+# interpolação do `env_file` do docker compose. Ver _ler_secret_literal.
+ADM_LOCAL_SENHA_HASH = _ler_secret_literal("ADM_LOCAL_SENHA_HASH")
 
 # ============================================================
 # Sessão do Flask (cookie de login)
@@ -296,7 +331,10 @@ ADM_LOCAL_SENHA_HASH = _obter_variavel("ADM_LOCAL_SENHA_HASH", obrigatoria=False
 # mesma chave, senão o login cai a cada troca de worker. Se vazia, o servidor
 # gera uma chave aleatória no startup (apenas para dev/teste — sessões não
 # sobrevivem a reinício nem são compartilhadas entre workers).
-FLASK_SECRET_KEY = _obter_variavel("FLASK_SECRET_KEY", obrigatoria=False, padrao="")
+# Também lido LITERALMENTE: uma chave secreta pode conter '$' e, se entregue
+# via `env_file` do compose, chegaria corrompida — invalidando os cookies de
+# sessão de forma silenciosa. Ver _ler_secret_literal.
+FLASK_SECRET_KEY = _ler_secret_literal("FLASK_SECRET_KEY")
 
 # Enviar o cookie de sessão apenas por HTTPS. "true"/"false". Padrão false
 # (acesso interno por HTTP). Defina "true" quando o dashboard estiver atrás

@@ -13,8 +13,10 @@ Verifica:
 
 from unittest.mock import patch
 
+from dotenv import dotenv_values
 from werkzeug.security import generate_password_hash
 
+import config.configuracoes as configuracoes
 import servicos.ad_auth as ad_auth
 import servicos.auth_local as auth_local
 import app.autenticacao as autenticacao
@@ -208,6 +210,53 @@ class TestAdminLocal:
             )
         assert resp.status_code == 302
         mock_ad.assert_not_called()
+
+
+# ─── Segredo com '$' x interpolação do docker compose ──────────────────────
+
+class TestSecretComCifrao:
+    """
+    O hash Werkzeug ('scrypt:...$salt$hash') contém '$'. Entregue via `env_file`
+    do docker compose, o '$' é interpretado como interpolação e o trecho some,
+    corrompendo o hash no container. A correção lê o valor LITERAL do .env.
+    """
+
+    HASH_OK = "scrypt:32768:8:1$abBxSALT$deadbeefHASH"
+    # Como o compose entrega quando interpola (salt e hash viram vazio):
+    HASH_CORROMPIDO = "scrypt:32768:8:1"
+
+    def test_resolver_prefere_arquivo_sobre_ambiente_corrompido(self):
+        arquivo = {"ADM_LOCAL_SENHA_HASH": self.HASH_OK}
+        ambiente = {"ADM_LOCAL_SENHA_HASH": self.HASH_CORROMPIDO}
+        assert (
+            configuracoes._resolver_secret(arquivo, ambiente, "ADM_LOCAL_SENHA_HASH")
+            == self.HASH_OK
+        )
+
+    def test_resolver_cai_para_ambiente_quando_ausente_no_arquivo(self):
+        assert configuracoes._resolver_secret({}, {"X": "v"}, "X") == "v"
+        assert configuracoes._resolver_secret({}, {}, "X", "padrao") == "padrao"
+
+    def test_resolver_respeita_vazio_explicito_no_arquivo(self):
+        # Chave vazia no .env desabilita o recurso, sem cair para o ambiente.
+        assert configuracoes._resolver_secret({"X": ""}, {"X": "v"}, "X") == ""
+
+    def test_dotenv_sem_interpolacao_preserva_cifrao(self, tmp_path):
+        p = tmp_path / ".env"
+        p.write_text(f"ADM_LOCAL_SENHA_HASH={self.HASH_OK}\n", encoding="utf-8")
+        lido = dotenv_values(p, interpolate=False)["ADM_LOCAL_SENHA_HASH"]
+        assert lido == self.HASH_OK
+        assert lido.count("$") == 2
+
+    def test_hash_lido_literalmente_valida_a_senha(self, tmp_path):
+        # Ponta a ponta: hash gerado → lido literal → check_password_hash passa.
+        from werkzeug.security import check_password_hash
+
+        h = generate_password_hash("segredo123")  # contém '$'
+        p = tmp_path / ".env"
+        p.write_text(f"ADM_LOCAL_SENHA_HASH={h}\n", encoding="utf-8")
+        lido = dotenv_values(p, interpolate=False)["ADM_LOCAL_SENHA_HASH"]
+        assert check_password_hash(lido, "segredo123") is True
 
 
 # ─── Auditoria ─────────────────────────────────────────────────────────────

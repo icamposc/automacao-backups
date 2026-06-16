@@ -70,6 +70,12 @@ services:
       #   ADM_LOCAL_USUARIO / ADM_LOCAL_SENHA_HASH   (admin local break-glass)
       #   SESSION_COOKIE_SECURE   (true se atrás de HTTPS)
       # Sem essas variáveis, o /dashboard fica inacessível (login falha).
+      #
+      # IMPORTANTE: ADM_LOCAL_SENHA_HASH e FLASK_SECRET_KEY são lidos
+      # LITERALMENTE do .env pelo app (config/configuracoes.py), justamente
+      # porque o '$' do hash Werkzeug seria corrompido pela interpolação do
+      # `env_file` do compose. NÃO escapar '$' como '$$' no .env — gravar o
+      # valor cru, exatamente como o scripts/definir_senha_admin_local.py gera.
     environment:
       TZ: America/Sao_Paulo
       # ── Variáveis de infraestrutura (fixas por ambiente) ──
