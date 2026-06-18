@@ -1,0 +1,8 @@
+[Unit]
+Description=Manutencao semanal Automacao de Backups (reinicio controlado dos containers)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/automacao-backups/scripts/manutencao_semanal.sh
