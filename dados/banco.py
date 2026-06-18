@@ -32,12 +32,16 @@ def obter_conexao() -> sqlite3.Connection:
         SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread omitido (padrão True) — cada thread tem sua própria
         # conexão via threading.local(), portanto nunca há compartilhamento
-        conn = sqlite3.connect(str(SQLITE_PATH))
+        conn = sqlite3.connect(str(SQLITE_PATH), timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA wal_autocheckpoint=1000")
+        # Espera até 5s por um lock antes de falhar, em vez de pendurar a
+        # requisição indefinidamente (o que levava workers do Gunicorn ao
+        # WORKER TIMEOUT durante backups com escrita intensa no banco).
+        conn.execute("PRAGMA busy_timeout=5000")
         _local.conn = conn
     return _local.conn
 

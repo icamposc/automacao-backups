@@ -112,11 +112,19 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+    # worker-class gthread: cada worker atende várias requisições em threads,
+    # então um cliente lento (ou uma leitura travada em lock do SQLite) deixa de
+    # derrubar o worker inteiro por WORKER TIMEOUT — gatilho que disparava o
+    # falso "Servidor Reiniciou" (SPN-64951). graceful-timeout dá folga para o
+    # encerramento limpo das requisições em andamento.
     command: >
       gunicorn
         --bind 0.0.0.0:5000
         --workers 2
+        --worker-class gthread
+        --threads 4
         --timeout 120
+        --graceful-timeout 30
         --access-logfile /app/logs/gunicorn_acesso.log
         --error-logfile /app/logs/gunicorn_erro.log
         --log-level info
