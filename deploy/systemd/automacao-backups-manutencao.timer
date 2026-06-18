@@ -1,0 +1,9 @@
+[Unit]
+Description=Dispara manutencao semanal aos domingos 04:00 (horario de Brasilia)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
