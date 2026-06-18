@@ -257,18 +257,23 @@ def listar_interrompidos_para_recuperacao() -> list:
     os dados necessários para re-enfileirar os processos.
 
     Returns:
-        Lista de dicts com email, ticket_id, nome e deletar_conta de cada backup interrompido.
+        Lista de dicts com email, ticket_id, nome, deletar_conta e
+        celery_task_id de cada backup em andamento. O celery_task_id permite
+        à recuperação confirmar se a tarefa ainda está viva no worker antes
+        de tratá-la como interrompida (ver processamento/recuperacao.py).
     """
     conn = obter_conexao()
     rows = conn.execute(
-        "SELECT email, ticket_id, nome, deletar_conta FROM backups WHERE status_geral = 'em_andamento'"
+        "SELECT email, ticket_id, nome, deletar_conta, celery_task_id "
+        "FROM backups WHERE status_geral = 'em_andamento'"
     ).fetchall()
     return [
         {
-            "email":        r["email"],
-            "ticket_id":    r["ticket_id"],
-            "nome":         r["nome"],
+            "email":         r["email"],
+            "ticket_id":     r["ticket_id"],
+            "nome":          r["nome"],
             "deletar_conta": bool(r["deletar_conta"]),
+            "celery_task_id": r["celery_task_id"],
         }
         for r in rows
     ]

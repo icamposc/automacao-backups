@@ -13,7 +13,11 @@ from unittest.mock import patch, MagicMock
 
 @pytest.fixture(autouse=True)
 def banco_isolado(banco_teste):
-    yield
+    # Por padrão, simula "nenhuma tarefa Celery viva" — ou seja, um restart real
+    # em que os processos morreram. Os testes que exercitam o caso de tarefa viva
+    # sobrescrevem este patch internamente.
+    with patch("processamento.recuperacao._coletar_task_ids_ativos", return_value=set()):
+        yield
 
 
 def _registrar_falhas(ticket_id: str, email: str, n: int) -> None:
@@ -77,6 +81,54 @@ class TestRecuperacaoBlacklist:
 
         assert reagendados == 0
         mock_async.assert_not_called()
+
+    def test_nao_reclama_backup_com_tarefa_ainda_ativa(self):
+        """SPN-64951: respawn de worker do Gunicorn não pode reclamar um backup
+        que segue rodando no worker Celery."""
+        from processamento import recuperacao
+        from dados.repositorio_backups import (
+            inserir_backup, salvar_celery_task_id, existe_backup_em_andamento,
+        )
+
+        ticket = "SPN-VIVO"
+        email = "vivo@empresa.com"
+        inserir_backup(email, ticket, "Teste")
+        salvar_celery_task_id(email, "task-viva-123")
+
+        mock_async = MagicMock()
+        mock_alerta = MagicMock()
+        # A tarefa AINDA está ativa no worker — não é restart real.
+        with patch("processamento.recuperacao._coletar_task_ids_ativos",
+                   return_value={"task-viva-123"}), \
+             patch("processamento.orquestrador.iniciar_backup_async", mock_async), \
+             patch("servicos.google_chat.notificar_restart_servidor", mock_alerta):
+            reagendados = recuperacao.recuperar_backups_interrompidos()
+
+        assert reagendados == 0
+        mock_async.assert_not_called()          # não reagenda
+        mock_alerta.assert_not_called()         # não dispara alerta falso de restart
+        assert existe_backup_em_andamento(email) is True  # segue em andamento
+
+    def test_reclama_quando_tarefa_morta_mesmo_com_task_id(self):
+        """Restart real: a tarefa não está mais ativa → reclama normalmente."""
+        from processamento import recuperacao
+        from dados.repositorio_backups import inserir_backup, salvar_celery_task_id
+
+        ticket = "SPN-MORTA"
+        email = "morta@empresa.com"
+        inserir_backup(email, ticket, "Teste")
+        salvar_celery_task_id(email, "task-morta-999")
+
+        mock_async = MagicMock()
+        # Conjunto de ativos NÃO contém a task → considerada morta.
+        with patch("processamento.recuperacao._coletar_task_ids_ativos",
+                   return_value={"outra-task-abc"}), \
+             patch("processamento.orquestrador.iniciar_backup_async", mock_async), \
+             patch("servicos.google_chat.notificar_restart_servidor"):
+            reagendados = recuperacao.recuperar_backups_interrompidos()
+
+        assert reagendados == 1
+        mock_async.assert_called_once()
 
     def test_multiplos_tickets_um_bloqueado_outros_nao(self):
         from processamento import recuperacao
